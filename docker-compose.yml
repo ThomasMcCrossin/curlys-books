@@ -1,0 +1,159 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: curlys-books-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-curlys_admin}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME:-curlys_books}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=en_US.UTF-8"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "127.0.0.1:5432:5432"
+    mem_limit: 2g
+    cpus: 1.0
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-curlys_admin}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: curlys-books-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "127.0.0.1:6379:6379"
+    mem_limit: 512m
+    cpus: 0.5
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: infra/docker/api/Dockerfile
+    container_name: curlys-books-api
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=postgresql://${DB_USER:-curlys_admin}:${DB_PASSWORD}@postgres:5432/${DB_NAME:-curlys_books}
+      - REDIS_URL=redis://redis:6379/0
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - CLOUDFLARE_ACCESS_AUD=${CLOUDFLARE_ACCESS_AUD}
+      - CLOUDFLARE_TEAM_DOMAIN=${CLOUDFLARE_TEAM_DOMAIN}
+    volumes:
+      - ./apps/api:/app/apps/api
+      - ./packages:/app/packages
+      - receipt_storage:/srv/objects
+      - receipt_library:/library
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    mem_limit: 1g
+    cpus: 1.0
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  worker:
+    build:
+      context: .
+      dockerfile: infra/docker/worker/Dockerfile
+    container_name: curlys-books-worker
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=postgresql://${DB_USER:-curlys_admin}:${DB_PASSWORD}@postgres:5432/${DB_NAME:-curlys_books}
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      # OCR
+      - TESSERACT_PATH=${TESSERACT_PATH:-/usr/bin/tesseract}
+      - TESSERACT_CONFIDENCE_THRESHOLD=${TESSERACT_CONFIDENCE_THRESHOLD:-90}
+      # AWS Textract (fallback)
+      - TEXTRACT_FALLBACK_ENABLED=${TEXTRACT_FALLBACK_ENABLED:-true}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_TEXTRACT_REGION=${AWS_TEXTRACT_REGION:-us-east-1}
+
+    volumes:
+      - ./services/worker:/app/services/worker
+      - ./packages:/app/packages
+      - receipt_storage:/srv/objects
+      - receipt_library:/library
+      - /tmp/ocr_cache:/tmp/ocr_cache
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    mem_limit: 4g
+    cpus: 2.0
+    command: celery -A services.worker.celery_app worker --loglevel=info --concurrency=2
+
+  web:
+    build:
+      context: .
+      dockerfile: infra/docker/web/Dockerfile
+    container_name: curlys-books-web
+    restart: unless-stopped
+    environment:
+      - NEXT_PUBLIC_API_URL=http://api:8000
+      - NODE_ENV=${NODE_ENV:-production}
+    volumes:
+      - ./apps/web:/app/apps/web
+      - web_cache:/app/.next
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - api
+    mem_limit: 512m
+    cpus: 0.5
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  receipt_storage:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /srv/curlys-books/objects
+  receipt_library:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /library
+  web_cache:
+    driver: local
+
+networks:
+  default:
+    name: curlys-books-network

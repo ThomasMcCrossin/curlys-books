@@ -1,0 +1,263 @@
+[tool.poetry]
+name = "curlys-books"
+version = "0.1.0"
+description = "Multi-entity accounting system for Curly's Canteen and Curly's Sports & Supplements"
+authors = ["Thomas McCrossin <thomas@curlys.ca>"]
+readme = "README.md"
+packages = [
+    { include = "apps" },
+    { include = "packages" },
+    { include = "services" }
+]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+
+# Web framework
+fastapi = "^0.109.0"
+uvicorn = {extras = ["standard"], version = "^0.27.0"}
+pydantic = "^2.5.3"
+pydantic-settings = "^2.1.0"
+
+# Database
+sqlalchemy = "^2.0.25"
+psycopg2-binary = "^2.9.9"
+alembic = "^1.13.1"
+
+# Redis & Celery
+redis = "^5.0.1"
+celery = "^5.3.6"
+celery-types = "^0.20.0"
+
+# OCR & Image Processing
+pytesseract = "^0.3.10"
+Pillow = "^10.2.0"
+opencv-python-headless = "^4.9.0"
+pdf2image = "^1.17.0"
+pypdf = "^4.0.1"
+imagehash = "^4.3.1"
+
+# AI/ML for parsing fallback
+openai = "^1.10.0"
+anthropic = "^0.18.0"
+
+# Data processing
+pandas = "^2.2.0"
+numpy = "^1.26.3"
+openpyxl = "^3.1.2"
+
+# Google integrations
+google-auth = "^2.27.0"
+google-auth-oauthlib = "^1.2.0"
+google-api-python-client = "^2.116.0"
+gspread = "^6.0.0"
+
+# Shopify
+ShopifyAPI = "^12.4.0"
+
+# Utilities
+python-dateutil = "^2.8.2"
+python-multipart = "^0.0.6"
+email-validator = "^2.1.0"
+httpx = "^0.26.0"
+aiofiles = "^23.2.1"
+tenacity = "^8.2.3"
+
+# Security & Auth
+pyjwt = "^2.8.0"
+python-jose = {extras = ["cryptography"], version = "^3.3.0"}
+passlib = {extras = ["bcrypt"], version = "^1.7.4"}
+
+# Logging & Monitoring
+structlog = "^24.1.0"
+sentry-sdk = {extras = ["fastapi"], version = "^1.40.0"}
+prometheus-client = "^0.19.0"
+
+# File handling
+rclone-python = "^0.1.11"
+boto3 = "^1.34.34"
+
+[tool.poetry.group.dev.dependencies]
+# Testing
+pytest = "^7.4.4"
+pytest-asyncio = "^0.23.3"
+pytest-cov = "^4.1.0"
+pytest-mock = "^3.12.0"
+httpx = "^0.26.0"
+faker = "^22.6.0"
+
+# Linting & Formatting
+ruff = "^0.1.14"
+black = "^24.1.1"
+isort = "^5.13.2"
+mypy = "^1.8.0"
+pre-commit = "^3.6.0"
+
+# Type stubs
+types-redis = "^4.6.0"
+types-pillow = "^10.2.0"
+sqlalchemy-stubs = "^0.4"
+
+# Import checking
+import-linter = "^2.0"
+
+[tool.poetry.group.test.dependencies]
+coverage = {extras = ["toml"], version = "^7.4.1"}
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+# Ruff configuration
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+]
+ignore = [
+    "E501",  # line too long (handled by black)
+    "B008",  # do not perform function calls in argument defaults
+    "C901",  # too complex (we'll handle on case-by-case basis)
+]
+
+[tool.ruff.per-file-ignores]
+"__init__.py" = ["F401"]  # Allow unused imports in __init__.py
+
+# Black configuration
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.git
+  | \.mypy_cache
+  | \.pytest_cache
+  | \.venv
+  | _build
+  | build
+  | dist
+  | migrations
+)/
+'''
+
+# isort configuration
+[tool.isort]
+profile = "black"
+line_length = 100
+known_first_party = ["apps", "packages", "services"]
+sections = ["FUTURE", "STDLIB", "THIRDPARTY", "FIRSTPARTY", "LOCALFOLDER"]
+skip_gitignore = true
+
+# mypy configuration
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+strict_equality = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = [
+    "pytesseract.*",
+    "imagehash.*",
+    "pdf2image.*",
+    "shopify.*",
+    "rclone.*",
+]
+ignore_missing_imports = true
+
+# pytest configuration
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-v",
+    "--strict-markers",
+    "--tb=short",
+    "--cov=packages",
+    "--cov=apps/api",
+    "--cov-report=term-missing",
+    "--cov-report=html",
+    "--cov-fail-under=85"
+]
+markers = [
+    "unit: Unit tests (fast, isolated)",
+    "integration: Integration tests (requires DB/Redis)",
+    "golden: Golden receipt tests (vendor parsing validation)",
+    "slow: Slow tests (OCR, external APIs)",
+]
+
+# Coverage configuration
+[tool.coverage.run]
+source = ["apps", "packages", "services"]
+omit = [
+    "*/tests/*",
+    "*/migrations/*",
+    "*/__pycache__/*",
+    "*/venv/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod",
+]
+
+# Import linter configuration
+[tool.importlinter]
+root_package = "curlys_books"
+
+[[tool.importlinter.contracts]]
+name = "Apps cannot import from each other"
+type = "independence"
+modules = [
+    "apps.api",
+    "apps.web",
+]
+
+[[tool.importlinter.contracts]]
+name = "Packages cannot import from apps"
+type = "forbidden"
+source_modules = [
+    "packages.*",
+]
+forbidden_modules = [
+    "apps.*",
+    "services.*",
+]
+
+[[tool.importlinter.contracts]]
+name = "Domain layer is pure (no I/O)"
+type = "forbidden"
+source_modules = [
+    "packages.domain",
+]
+forbidden_modules = [
+    "sqlalchemy",
+    "redis",
+    "httpx",
+    "celery",
+]
