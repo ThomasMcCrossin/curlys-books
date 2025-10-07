@@ -134,3 +134,7 @@ __pycache__/
 # OS
 .DS_Store
 Thumbs.db
+
+# GCP Service Account Keys
+curlys-books-*.json
+*service-account*.json
