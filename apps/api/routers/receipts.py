@@ -16,7 +16,7 @@ from sqlalchemy import select
 from packages.common.database import get_db_session
 from packages.common.config import get_settings
 from packages.common.schemas.receipt_normalized import ReceiptUploadResponse, ReceiptStatus, EntityType
-from services.worker.tasks.ocr_receipt import process_receipt_task
+from apps.api.tasks import queue_receipt_ocr
 
 logger = structlog.get_logger()
 router = APIRouter()
@@ -95,18 +95,19 @@ async def upload_receipt(
                 path=str(original_path),
                 size_bytes=len(content))
     
-    # Queue OCR processing task
-    task = process_receipt_task.delay(
+    # Queue OCR processing
+    task_id = queue_receipt_ocr(
         receipt_id=receipt_id,
         entity=entity.value,
         file_path=str(original_path),
         content_hash=content_hash,
-        source=source,
+        source=source
     )
+
     
     logger.info("receipt_queued_for_processing",
                 receipt_id=receipt_id,
-                task_id=task.id)
+                task_id=task_id)
     
     return ReceiptUploadResponse(
         receipt_id=receipt_id,

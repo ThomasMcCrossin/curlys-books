@@ -115,4 +115,22 @@ alembic/versions/*.py~
 .secrets.baseline
 
 # Local development overrides
-docker-compose.override.yml
+docker-compose.override.yml.env
+# Environment
+.env
+.env.local
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# IDEs
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

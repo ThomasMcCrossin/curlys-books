@@ -53,9 +53,11 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - CLOUDFLARE_ACCESS_AUD=${CLOUDFLARE_ACCESS_AUD}
       - CLOUDFLARE_TEAM_DOMAIN=${CLOUDFLARE_TEAM_DOMAIN}
-    volumes:
+    volumes: 
+      - ./alembic.ini:/app/alembic.ini:ro
       - ./apps/api:/app/apps/api
       - ./packages:/app/packages
+      - ./infra:/app/infra
       - receipt_storage:/srv/objects
       - receipt_library:/library
     ports:
@@ -98,6 +100,7 @@ services:
     volumes:
       - ./services/worker:/app/services/worker
       - ./packages:/app/packages
+      - ./infra:/app/infra
       - receipt_storage:/srv/objects
       - receipt_library:/library
       - /tmp/ocr_cache:/tmp/ocr_cache
