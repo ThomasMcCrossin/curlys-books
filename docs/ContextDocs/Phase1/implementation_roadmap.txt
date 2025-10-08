@@ -1,0 +1,384 @@
+# Phase 1 Implementation Roadmap
+
+## Current State (Phase 0 Complete ✅)
+
+- Docker stack running
+- PostgreSQL with dual schemas (curlys_corp, curlys_soleprop)
+- API with receipt upload endpoint
+- Celery worker with stub OCR task
+- Tesseract 5.5.0 installed in worker
+- AWS Textract configured (fallback)
+
+**What works:**
+- Receipt upload via API → queued to worker
+- Stub task processes and returns success
+- All health checks passing
+
+---
+
+## Phase 1 Priorities (Build in This Order)
+
+### Week 1: Foundation
+
+#### 1. Vendor Registry (Day 1) ✅ DOCS READY
+**File:** Create migration `003_vendor_registry.sql`
+
+```sql
+-- See vendor_registry_sql artifact
+-- Creates vendor_registry table
+-- Adds normalize_vendor_name() function  
+-- Seeds 17 priority vendors
+```
+
+**Test:**
+```bash
+make migrate
+psql -c "SELECT normalize_vendor_name('gordon food svc');"
+# Should return: GFS Canada
+```
+
+#### 2. Product Mappings Cache (Day 1) ✅ DOCS READY
+**File:** Create migration `004_product_mappings.sql`
+
+```sql
+-- Creates product_mappings table for SKU cache
+-- Creates receipt_line_items table
+-- Indexes for fast lookups
+```
+
+#### 3. Base Parser Infrastructure (Day 2)
+**Files to create:**
+- `packages/parsers/vendors/base_parser.py`
+- `packages/parsers/vendor_dispatcher.py`
+
+**Test:**
+```python
+from packages.parsers.vendors.base_parser import BaseReceiptParser
+
+parser = BaseReceiptParser()
+# Verify abstract methods work
+```
+
+### Week 2: Vendor Parsers
+
+#### 4. Costco Parser (Day 3-4) 📋 SPECS IN RECEIPT_SAMPLES_ANALYSIS.md
+**File:** `packages/parsers/vendors/costco_parser.py`
+
+**Why first:** Clean format, high volume, good samples
+
+**Features:**
+- Parse line items with SKU + description + price
+- Handle deposits (9xxx SKUs)
+- Handle discounts (TPD/ prefix, negatives)
+- Detect Costco format reliably
+
+**Test with:** Sample 2 (Costco online order)
+
+#### 5. Atlantic Superstore Parser (Day 4-5) 📋 CRITICAL: HANDLE PRICE ERRORS
+**File:** `packages/parsers/vendors/superstore_parser.py`
+
+**Challenges:**
+- OCR returns "10.9E" instead of "$10.99"
+- Variable spacing in SKUs
+- Quantity prefixes
+
+**Test with:** Samples 4, 5, 6 (Superstore receipts)
+
+#### 6. Generic Fallback Parser (Day 5)
+**File:** `packages/parsers/vendors/generic_parser.py`
+
+**Purpose:** Handle unknown vendors, faded receipts
+
+**Strategy:** Extract whatever is readable, flag for review
+
+### Week 3: AI Integration
+
+#### 7. AI Categorization Service (Day 6-7) 📋 SPECS IN AI_CATEGORIZATION_SPEC.md
+**Files:**
+- `packages/ai/categorizer.py`
+- `packages/ai/product_cache.py`
+
+**Features:**
+- Claude API integration
+- SKU cache lookup (free, instant)
+- AI fallback for new products
+- Cost tracking
+
+**Test:**
+```python
+# First call: Uses AI
+result1 = await categorize_line_item(vendor="GFS", sku="12345", desc="PEPSI")
+assert result1.source == 'ai_suggested'
+
+# Approve and cache
+await approve_categorization(...)
+
+# Second call: Cache hit
+result2 = await categorize_line_item(vendor="GFS", sku="12345", desc="PEPSI")
+assert result2.source == 'cached'
+assert result2.ai_cost == 0
+```
+
+#### 8. Integrate with OCR Pipeline (Day 8)
+**File:** Update `services/worker/tasks/ocr_receipt.py`
+
+**Replace stub with:**
+1. Tesseract OCR (primary)
+2. Textract fallback (if confidence < 90%)
+3. Vendor normalization
+4. Parser selection
+5. Line item extraction
+6. AI categorization (with caching)
+7. Database storage
+
+**Test end-to-end:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/receipts/upload" \
+  -F "file=@vendor-samples/CurlysCanteenCorp/GFS/invoice.pdf" \
+  -F "entity=corp"
+
+# Check database
+psql -c "SELECT * FROM receipt_line_items ORDER BY created_at DESC LIMIT 5;"
+```
+
+### Week 4: Testing & Polish
+
+#### 9. Golden Test Suite (Day 9-10)
+**Files:**
+- `tests/test_parsers/test_costco_parser.py`
+- `tests/test_parsers/test_superstore_parser.py`
+- `tests/fixtures/` (OCR outputs from samples)
+
+**Test all 67 samples:**
+```bash
+pytest tests/test_parsers/ -v
+# Should pass for all vendor formats
+```
+
+#### 10. Error Handling & Logging (Day 11)
+**Add:**
+- Retry logic for failed OCR
+- Detailed error logging
+- Performance metrics
+- Cost tracking dashboard
+
+#### 11. Documentation (Day 12)
+**Files:**
+- `docs/VENDOR_PARSERS.md`
+- `docs/ADDING_NEW_VENDORS.md`
+- `docs/AI_CATEGORIZATION.md`
+
+---
+
+## File Structure (After Phase 1)
+
+```
+curlys-books/
+├── infra/db/migrations/
+│   ├── 001_initial_schema.py
+│   ├── 002_seed_chart_of_accounts.py
+│   ├── 003_vendor_registry.py          # NEW
+│   └── 004_product_mappings.py         # NEW
+│
+├── packages/
+│   ├── common/
+│   │   ├── config.py
+│   │   ├── database.py
+│   │   └── schemas/
+│   │       └── receipt_normalized.py
+│   │
+│   ├── parsers/
+│   │   ├── __init__.py
+│   │   ├── ocr_engine.py               # Tesseract wrapper
+│   │   ├── vendor_service.py           # Vendor normalization
+│   │   ├── vendor_dispatcher.py        # NEW: Route to parser
+│   │   └── vendors/
+│   │       ├── __init__.py
+│   │       ├── base_parser.py          # NEW: Abstract base
+│   │       ├── costco_parser.py        # NEW
+│   │       ├── superstore_parser.py    # NEW
+│   │       └── generic_parser.py       # NEW: Fallback
+│   │
+│   └── ai/
+│       ├── __init__.py
+│       ├── categorizer.py              # NEW: Claude integration
+│       └── product_cache.py            # NEW: SKU caching
+│
+├── services/worker/
+│   ├── celery_app.py
+│   └── tasks/
+│       └── ocr_receipt.py              # UPDATE: Full pipeline
+│
+└── tests/
+    ├── test_parsers/
+    │   ├── test_costco_parser.py       # NEW
+    │   ├── test_superstore_parser.py   # NEW
+    │   └── test_ai_categorization.py   # NEW
+    └── fixtures/
+        ├── costco_sample_ocr.txt       # NEW
+        └── superstore_sample_ocr.txt   # NEW
+```
+
+---
+
+## Dependencies to Add
+
+```toml
+# pyproject.toml
+
+[tool.poetry.dependencies]
+# Existing
+python = "^3.11"
+fastapi = "^0.104.0"
+# ... existing deps
+
+# ADD THESE:
+anthropic = "^0.39.0"          # Claude AI
+pytesseract = "^0.3.10"        # Tesseract wrapper
+pillow = "^10.1.0"             # Image processing
+pdf2image = "^1.16.3"          # PDF to image conversion
+```
+
+```bash
+# Install
+poetry add anthropic pytesseract pillow pdf2image
+poetry lock
+docker compose build worker
+```
+
+---
+
+## Configuration Updates
+
+### .env additions:
+```bash
+# AI Categorization
+ANTHROPIC_API_KEY=sk-ant-...
+ENABLE_AI_CATEGORIZATION=true
+AI_MODEL=claude-sonnet-4-5-20250929
+AUTO_APPROVE_CONFIDENCE_THRESHOLD=0.95
+
+# OCR (already configured)
+TESSERACT_CONFIDENCE_THRESHOLD=90
+TEXTRACT_FALLBACK_ENABLED=true
+```
+
+---
+
+## Testing Checklist
+
+### Unit Tests
+- [ ] Vendor normalization (fuzzy matching)
+- [ ] Costco parser (line items, deposits, discounts)
+- [ ] Superstore parser (price error handling)
+- [ ] AI categorization (mock Claude API)
+- [ ] Product cache (lookup, store)
+
+### Integration Tests
+- [ ] OCR → Parser → Categorization pipeline
+- [ ] Cache hit rate (second receipt same SKUs)
+- [ ] Textract fallback (low confidence)
+- [ ] End-to-end receipt processing
+
+### Golden Tests
+- [ ] All 67 vendor samples parse correctly
+- [ ] No regressions when adding new parsers
+
+---
+
+## Success Metrics
+
+### OCR Quality
+- **Target:** 95%+ receipts with >90% confidence
+- **Measure:** `AVG(confidence_score) FROM receipts`
+
+### Cache Hit Rate
+- **Month 1:** 40% (learning)
+- **Month 3:** 85%+ (mature)
+- **Target:** 95%+ after 6 months
+
+### AI Costs
+- **Month 1:** <$10 (initial learning)
+- **Month 6+:** <$1/month (mostly cached)
+
+### Processing Speed
+- **Target:** <5 seconds per receipt
+- **Measure:** `AVG(processing_time_ms)`
+
+---
+
+## Rollout Plan
+
+### Stage 1: Development (Week 1-4)
+- Build parsers
+- Test with samples
+- No production data
+
+### Stage 2: Alpha Testing (1 week)
+- Process 10 real receipts manually
+- Verify categorizations
+- Fix any issues
+
+### Stage 3: Beta (2 weeks)
+- Process past month's receipts
+- Review all AI suggestions
+- Build confidence
+
+### Stage 4: Production (Ongoing)
+- Enable for new receipts
+- Monitor costs
+- Add vendors as needed
+
+---
+
+## Quick Start Commands
+
+```bash
+# Apply migrations
+make migrate
+
+# Test vendor normalization
+python -c "
+from packages.parsers.vendor_service import VendorRegistry
+import asyncio
+vr = VendorRegistry()
+print(asyncio.run(vr.normalize_vendor_name('costco whse')))
+"
+
+# Process test receipt
+curl -X POST "http://localhost:8000/api/v1/receipts/upload" \
+  -F "file=@vendor-samples/CurlysCanteenCorp/Costco/receipt.pdf" \
+  -F "entity=corp"
+
+# Check results
+docker compose logs worker --tail=50
+psql -c "SELECT * FROM receipt_line_items ORDER BY created_at DESC LIMIT 10;"
+
+# Monitor AI costs
+psql -c "SELECT DATE(created_at), COUNT(*), SUM(ai_cost) FROM receipt_line_items WHERE ai_cost > 0 GROUP BY DATE(created_at);"
+```
+
+---
+
+## Reference Documents
+
+- `PARSER_DEVELOPMENT_GUIDE.md` - Parser architecture & examples
+- `RECEIPT_SAMPLES_ANALYSIS.md` - Real receipt formats from uploads
+- `AI_CATEGORIZATION_SPEC.md` - AI integration & caching
+- `vendor_registry_sql` (artifact) - Database setup
+- `project_contextv5_phase0COMPLETE.md` - Original project context
+
+---
+
+## Support & Questions
+
+If stuck:
+1. Check error logs: `docker compose logs worker --tail=100`
+2. Test component in isolation
+3. Verify database migrations applied
+4. Check .env configuration
+5. Test with known-good receipt sample
+
+---
+
+**Ready to build!** Start with Week 1, Day 1: Vendor Registry migration.

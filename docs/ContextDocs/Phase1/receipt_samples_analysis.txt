@@ -1,0 +1,376 @@
+# Receipt Samples Analysis
+
+## Uploaded Samples
+
+From the user's uploads, we have these actual receipt formats to work with:
+
+---
+
+## Sample 1: Faded Thermal Receipt (Challenging)
+
+**Vendor:** Unknown (too faded)  
+**Quality:** Very poor - thermal paper faded over time  
+**OCR Challenge:** High - will likely need Textract fallback
+
+**What we can see:**
+```
+ITEM ...
+... MEASURE ... 
+JUICE TEA BOX
+... SANDWICH THICK
+... BROWNIE ...
+SUB TOTAL: 66.59
+HST ...: 3.43
+TOTAL: $70.01
+```
+
+**Parser Strategy:**
+- Textract will likely be needed (confidence < 90%)
+- Focus on totals extraction
+- Line items may be unreliable
+- Good test case for fallback logic
+
+---
+
+## Sample 2: Costco Online Order (Clean)
+
+**Vendor:** Costco Wholesale - Moncton #1345  
+**Quality:** Excellent - digital HTML receipt  
+**OCR Challenge:** Low - clean structured data
+
+**Format:**
+```
+Member: 111973270068
+
+306657  GATORADE          65.97 Y
+9490    DEPOSIT/306        8.40
+310062  PEPSI 32 PK       28.98 Y
+1770709 TPD/PEPSI          2.90-
+1770709 TPD/PEPSI          2.90-
+1770709 TPD/PEPSI          2.90-
+1770709 TPD/PEPSI          2.90-
+1770709 TPD/PEPSI          2.90-
+9491    DEPOSIT/310        6.40
+1009603 NERDS GUMMY       49.98 Y
+1510576 OASIS APP G       15.99 N
+9484    DEPOSIT/151        2.40
+1741719 COTTON CAND       29.97 Y
+1403346 QUEST BARS        59.98 Y
+1768082 TPD/1403346        6.00-
+1768082 TPD/1403346        6.00-
+
+SUBTOTAL: 1,375.13
+TAX: 148.39
+TOTAL: 1,523.52
+```
+
+**Parser Requirements:**
+- SKU: 5-7 digits
+- Description: Variable width
+- Price: Decimal with Y/N taxable flag
+- Handle deposits (9xxx SKUs)
+- Handle discounts (TPD/ prefix, negative amounts)
+- Multiple repeated discount lines
+
+**Line Item Categories (for AI):**
+- 306657 GATORADE → Beverages - Sports Drinks
+- 310062 PEPSI 32 PK → Beverages - Pop
+- 1009603 NERDS GUMMY → Candy - Gummy
+- 1741719 COTTON CAND → Candy - Cotton Candy
+- 1403346 QUEST BARS → Supplements - Protein Bars
+
+---
+
+## Sample 3: The Balcony Candy Shop
+
+**Vendor:** The Balcony Candy Shop - Moncton  
+**Quality:** Good  
+**OCR Challenge:** Medium - some formatting complexity
+
+**Format:**
+```
+21-GROCERY
+(3)0630636085         NN SODA SALTED    MRJ      9.37
+                      3 @ $2.79
+06033309624           SUNSPUN           MRJ     17.24
+06352618915           SUN JR. DISP NAP  HMRJ    22.35
+06591258123           REALEMON JUICE    MRJ     10.76
+                      2 @ $5.38
+
+23-FROZEN
+(2)05257580211        MC PICKLE SPR     MRJ     31.98
+                      2 @ $15.99
+
+27-PRODUCE
+(2)05258880010        POPYE SPN 1.13KG  MRJ     17.98
+                      2 @ $8.99
+
+36-HOME MEAL REPLACEMENT
+62086824649           SALAD COLESLAW    MRJ     23.99
+62096824672           MACARONT SALAD    HMRJ    23.99
+62096824674           SALAD POTATO      HMRJ    33.99
+                      ARCP: 50.00% ($33.99)      -17.00
+
+41-HOME
+05871331815           PC C/P KNIVE SET  HMRJ    25.00
+```
+
+**Parser Requirements:**
+- Section headers (21-GROCERY, 23-FROZEN, etc.)
+- Quantity prefix: (3)0630636085
+- Multi-line items (quantity pricing on separate line)
+- Discount calculations
+- Tax codes: MRJ, HMRJ
+- Long SKUs (13 digits)
+
+---
+
+## Sample 4: Atlantic Superstore (Paper Receipt, Some Fading)
+
+**Vendor:** Atlantic Superstore - Amherst #00312  
+**Quality:** Fair - some fading but readable  
+**OCR Challenge:** Medium - price format issues
+
+**Format:**
+```
+21-GROCERY
+(2)05870322321    NN DRY CLOTH ORI  HMRJ     10.9E
+                  2 @ $5.49
+
+23-FROZEN
+06038318936       NN IC SNDW VAN    HMRJ      9.9E
+06038318937       NN IC SNDW CHOC   HMRJ      9.9E
+
+SUBTOTAL:                                     30.96
+H-HST 15%         30.96 @ 15.000%             4.64
+
+TOTAL:                                        35.60
+```
+
+**Parser Challenges:**
+- **CRITICAL:** Prices show as "10.9E" instead of "$10.99"
+- **CRITICAL:** Prices show as "9.9E" instead of "$9.99"
+- Quantity prefix format: (2)05870322321
+- Long SKUs: 11-13 digits
+- Tax codes: HMRJ, MRJ
+- Multi-line quantity pricing
+
+**Price Cleanup Function Needed:**
+```python
+def fix_superstore_price(price_str: str) -> Decimal:
+    """
+    Handle Superstore OCR price errors.
+    "10.9E" → "10.99"
+    "9.9E" → "9.99"
+    "5.49" → "5.49" (already correct)
+    """
+    if price_str.endswith('E'):
+        # Replace E with 9 at the end
+        price_str = price_str[:-1] + '9'
+    
+    # Ensure 2 decimal places
+    if '.' in price_str:
+        parts = price_str.split('.')
+        if len(parts[1]) == 1:
+            price_str = price_str + '9'
+    
+    return Decimal(price_str)
+```
+
+---
+
+## Sample 5: Atlantic Superstore (More Degraded)
+
+**Vendor:** Atlantic Superstore - Amherst  
+**Quality:** Poor - crumpled, faded  
+**OCR Challenge:** High
+
+**Visible Text:**
+```
+22-DAIRY          SCOTSBURN CREAM        MRJ      5.29
+23-FROZEN         CRISPY FRIES           MRJ     44.97
+                  CB HOTDOG CP           MRJ     13...
+(3)056210...      NN CB HOTDOG CP        MRJ      8.99
+...MEATS          PC BRL SIZED CLIVE     ...      1.99
+33-BAKERY INSTORE RAISED HAWAIIAN       MRJ     -4.00
+                  ARCP: 50.00% ($7.99)                 77.23
+
+SUBTOTAL:                                        80.00
+TOTAL:                                          (77.25)
+                                                   ...
+```
+
+**Parser Strategy:**
+- Best effort extraction
+- Many line items partially visible
+- Focus on what's clearly readable
+- Flag for manual review
+- Good test of error handling
+
+---
+
+## Sample 6: Atlantic Superstore (Long Receipt, Good Quality)
+
+**Vendor:** Atlantic Superstore - Amherst #00312  
+**Quality:** Good  
+**OCR Challenge:** Low-Medium
+
+**Format:** (excerpt)
+```
+21-GROCERY
+(1)05643000137     UNRA ZERO SUGAR HMRJ      1.20
+(1)09344003       CUCUMBER            MRJ      1.49
+(1)01095...       SR PEPPER           HMRJ      ...
+              DEPOSIT                           1.20
+(1)07620060559    PN PC PC PAPER      HMRJ      9.49
+(2)05626680008    MOUNTAIN DEW        HMRJ      ...
+              DEPOSIT !                         1.40
+              2 @ $.70 DEPOSIT        HMRJ      2.40
+...
+
+GATORADE BOTTLES                              20000 PTS
+ENV PEPSI BEVERAGES                           20000 PTS
+
+SUBTOTAL:                                     490.10 @ 14.000%
+                                             634.96
+
+TOTAL:                                        634.96
+```
+
+**Parser Requirements:**
+- Very long receipt (65+ items)
+- Multiple deposit lines
+- PC Optimum points (ignore these)
+- Mixed tax codes
+- Quantity formats vary
+- Environment fees/deposits
+
+**Categories Present:**
+- Grocery items
+- Beverages (with deposits)
+- Pepsi products (beverage category)
+- Gatorade (sports drinks)
+- Paper products (store supplies)
+
+---
+
+## Key Parsing Patterns Across All Samples
+
+### 1. SKU Formats
+- **Costco:** 5-7 digits (306657, 1009603)
+- **Superstore:** 11-13 digits (05870322321)
+- **Balcony:** 13 digits (0630636085)
+
+### 2. Quantity Indicators
+- `(2)05870322321` - quantity prefix
+- `2 @ $5.49` - separate line
+- No quantity shown (assume 1)
+
+### 3. Price Formats
+- `65.97` - standard
+- `10.9E` - OCR error (Superstore)
+- `2.90-` - negative (discount)
+- `$70.01` - with dollar sign
+
+### 4. Tax Codes
+- `Y` / `N` - Costco taxable flag
+- `HMRJ` - Superstore HST
+- `MRJ` - Superstore different tax rate
+
+### 5. Special Line Types
+- Deposits: `9490 DEPOSIT/306`
+- Discounts: `1770709 TPD/PEPSI`
+- Percentage off: `ARCP: 50.00% ($33.99)`
+- Section headers: `21-GROCERY`, `23-FROZEN`
+
+---
+
+## Parser Priority Order
+
+Based on receipt volume and quality:
+
+1. **Costco** - High volume, clean format, good samples
+2. **Atlantic Superstore** - High volume, but OCR challenges
+3. **Balcony Candy Shop** - Good quality, complex structure
+4. **Generic Fallback** - For unknowns and faded receipts
+
+---
+
+## Testing Strategy
+
+For each parser, create test with actual OCR output:
+
+```python
+def test_costco_real_receipt():
+    # Use actual OCR text from Sample 2
+    with open('tests/fixtures/costco_moncton_sept2023.txt') as f:
+        ocr_text = f.read()
+    
+    parser = CostcoParser()
+    items = parser.parse_line_items(ocr_text)
+    
+    # Verify we extracted all items correctly
+    assert len(items) == 65  # Known item count
+    
+    # Spot check key items
+    gatorade = find_item_by_sku(items, "306657")
+    assert gatorade.description == "GATORADE"
+    assert gatorade.line_total == Decimal("65.97")
+```
+
+---
+
+## AI Categorization Examples
+
+Once parsed, these products need categorization:
+
+**Costco - First Time:**
+```
+SKU: 306657, Desc: "GATORADE"
+→ AI suggests: COGS - Beverages - Sports Drinks
+→ User approves
+→ Cached forever
+
+SKU: 1009603, Desc: "NERDS GUMMY"  
+→ AI suggests: COGS - Candy - Gummy
+→ User approves
+→ Cached forever
+```
+
+**Costco - Next Receipt (Same SKUs):**
+```
+SKU: 306657, Desc: "GATORADE"
+→ Cache hit: COGS - Beverages - Sports Drinks
+→ No AI call, instant categorization
+
+SKU: 1009603, Desc: "NERDS GUMMY"
+→ Cache hit: COGS - Candy - Gummy
+→ No AI call, instant categorization
+```
+
+**New Product:**
+```
+SKU: 1234567, Desc: "POKEMON BOOSTER BOX"
+→ Not in cache
+→ AI suggests: COGS - Collectibles - Trading Cards
+→ User approves
+→ Cached for future
+```
+
+---
+
+## Integration Checklist
+
+- [ ] Extract text with Tesseract (primary)
+- [ ] Fallback to Textract if confidence < 90%
+- [ ] Normalize vendor name (database lookup)
+- [ ] Select appropriate parser
+- [ ] Parse line items with fuzzy matching
+- [ ] For each item: Check SKU cache
+- [ ] For new items: Call AI categorization
+- [ ] Store results in database
+- [ ] Update cache with user approvals
+
+---
+
+This gives Claude Code everything it needs to build parsers that actually work with your real receipts.

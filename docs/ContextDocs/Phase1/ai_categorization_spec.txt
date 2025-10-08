@@ -1,0 +1,515 @@
+# AI Categorization Specification
+
+## Core Principle: Cache Everything
+
+**AI only runs on NEW products.** After user approves, it's cached forever.
+
+```
+First time seeing SKU 12345:
+  → Call AI (~$0.0015)
+  → User approves
+  → Cache to database
+
+Next 1000 times seeing SKU 12345:
+  → Database lookup (free, instant)
+  → No AI needed
+```
+
+---
+
+## Business Context for AI
+
+### Entity: Curly's Canteen (Corp)
+- **Type:** Convenience store / Food service
+- **Products:** Snacks, beverages, frozen foods, prepared foods
+- **Suppliers:** GFS, Costco, Capital Foods, Pepsi, Superstore
+
+### Entity: Curly's Sports & Supplements (Sole Prop)
+- **Type:** Retail - Supplements, Candy, Collectibles
+- **Products:** 
+  - Sports nutrition (protein, pre-workout, vitamins)
+  - Candy & confections
+  - **Pokemon cards & trading cards**
+  - **Funko Pops & collectibles**
+- **Suppliers:** Grosnor (collectibles/Pokemon), Peak Performance, Believe, Fit Foods, Supplement Facts
+
+**IMPORTANT:** Grosnor is primarily a **collectibles distributor** (Pokemon, Funko), NOT supplements.
+
+---
+
+## Chart of Accounts Structure
+
+```
+5100 - Cost of Goods Sold (Resale Inventory)
+├── 5110 - Supplements & Sports Nutrition
+├── 5120 - Candy & Confections
+├── 5130 - Collectibles
+│   ├── Trading Cards (Pokemon, Yu-Gi-Oh, etc.)
+│   ├── Funko Pops
+│   └── Other Collectibles
+├── 5140 - Beverages
+│   ├── Pop/Soda
+│   ├── Sports Drinks
+│   ├── Energy Drinks
+│   └── Juice
+├── 5150 - Snacks
+│   ├── Chips
+│   ├── Chocolate Bars
+│   └── Other Snacks
+├── 5160 - Frozen Foods
+└── 5170 - General Merchandise
+
+6100 - Operating Expenses (Business Use, Not Resale)
+├── 6110 - Office Supplies
+├── 6120 - Packaging & Shipping Materials
+├── 6130 - Store Supplies
+└── 6140 - Cleaning Supplies
+```
+
+---
+
+## AI Categorization Prompt Template
+
+```python
+CATEGORIZATION_PROMPT = """
+You are a Canadian accountant helping categorize business purchases.
+
+Business: {business_name}
+Type: {business_type}
+Entity: {entity} (corp or soleprop)
+Location: Nova Scotia (HST 14% as of April 2025)
+
+Vendor: {vendor_canonical}
+Vendor Type: {vendor_type}
+
+Line Item:
+- SKU: {sku}
+- Description: {description}
+- Amount: ${amount}
+
+Task: Categorize this purchase for accounting.
+
+Consider:
+1. Is this for RESALE (COGS) or business consumption (Operating Expense)?
+2. What specific product category?
+3. Examples:
+   - "Pokemon Booster Box" → COGS - Collectibles - Trading Cards
+   - "Funko Pop Spider-Man" → COGS - Collectibles - Funko Pops
+   - "Whey Protein 5lb" → COGS - Supplements
+   - "Bulk Gummy Bears" → COGS - Candy
+   - "Pepsi 24pk" → COGS - Beverages - Pop
+   - "Shipping Boxes" → Operating Expenses - Packaging
+
+Return ONLY valid JSON:
+{{
+  "account_code": "5100",
+  "account_name": "Cost of Goods Sold",
+  "product_category": "collectibles_trading_cards",
+  "confidence": 0.95,
+  "reasoning": "Pokemon trading card product for resale",
+  "hst_recoverable": true
+}}
+
+Important: Don't make assumptions about personal vs business use. Just suggest most likely category.
+"""
+```
+
+---
+
+## Product Category Taxonomy
+
+### Canteen (Corp) Categories
+```
+beverages_pop
+beverages_sports_drinks
+beverages_energy_drinks
+beverages_juice
+snacks_chips
+snacks_chocolate
+snacks_candy
+frozen_foods
+prepared_foods
+store_supplies
+```
+
+### Sports & Supplements (Sole Prop) Categories
+```
+supplements_protein
+supplements_preworkout
+supplements_vitamins
+candy_bulk
+candy_gummy
+candy_chocolate
+collectibles_trading_cards
+collectibles_pokemon
+collectibles_funko
+collectibles_other
+packaging_materials
+shipping_supplies
+```
+
+---
+
+## Categorization Service Implementation
+
+```python
+# packages/ai/categorizer.py
+
+import anthropic
+import json
+from decimal import Decimal
+
+class AICategorizationService:
+    """AI categorization with caching"""
+    
+    def __init__(self, api_key: str):
+        self.client = anthropic.Anthropic(api_key=api_key)
+    
+    async def suggest_category(
+        self,
+        vendor: str,
+        vendor_type: str,
+        sku: str,
+        description: str,
+        amount: Decimal,
+        entity: str
+    ) -> dict:
+        """
+        Get AI category suggestion for NEW product.
+        Only called when SKU not in cache.
+        """
+        
+        # Build prompt
+        prompt = self._build_prompt(
+            vendor=vendor,
+            vendor_type=vendor_type,
+            sku=sku,
+            description=description,
+            amount=amount,
+            entity=entity
+        )
+        
+        # Call Claude
+        response = self.client.messages.create(
+            model="claude-sonnet-4-5-20250929",
+            max_tokens=512,
+            messages=[{
+                "role": "user",
+                "content": prompt
+            }]
+        )
+        
+        # Parse JSON
+        result = json.loads(response.content[0].text)
+        
+        # Add metadata
+        result['cost'] = (
+            response.usage.input_tokens / 1_000_000 * 3.0 +
+            response.usage.output_tokens / 1_000_000 * 15.0
+        )
+        
+        return result
+```
+
+---
+
+## Caching Service
+
+```python
+# packages/ai/product_cache.py
+
+from typing import Optional
+from dataclasses import dataclass
+from decimal import Decimal
+import hashlib
+
+@dataclass
+class CachedCategory:
+    account_code: str
+    product_category: str
+    user_confidence: Decimal
+    times_seen: int
+
+class ProductCache:
+    """SKU-based categorization cache"""
+    
+    async def lookup(
+        self,
+        vendor: str,
+        sku: str
+    ) -> Optional[CachedCategory]:
+        """
+        Check if we've categorized this SKU before.
+        Returns cached category or None.
+        """
+        
+        # Generate lookup key
+        lookup_hash = hashlib.sha256(
+            f"{vendor}:{sku}".encode()
+        ).hexdigest()
+        
+        # Database lookup
+        result = await db.fetch_one(
+            """
+            SELECT 
+                account_code,
+                product_category,
+                user_confidence,
+                times_seen
+            FROM product_mappings
+            WHERE lookup_hash = $1
+            """,
+            lookup_hash
+        )
+        
+        if result:
+            return CachedCategory(**result)
+        
+        return None
+    
+    async def store_user_approval(
+        self,
+        vendor: str,
+        sku: str,
+        description: str,
+        account_code: str,
+        product_category: str
+    ):
+        """
+        Store user's approved categorization.
+        This is what gets cached, NOT the AI suggestion.
+        """
+        
+        lookup_hash = hashlib.sha256(
+            f"{vendor}:{sku}".encode()
+        ).hexdigest()
+        
+        await db.execute(
+            """
+            INSERT INTO product_mappings (
+                vendor_canonical,
+                sku,
+                description_normalized,
+                account_code,
+                product_category,
+                lookup_hash,
+                times_seen,
+                user_confidence
+            ) VALUES ($1, $2, $3, $4, $5, $6, 1, 0.99)
+            ON CONFLICT (lookup_hash) DO UPDATE
+            SET times_seen = product_mappings.times_seen + 1,
+                user_confidence = 0.99
+            """,
+            vendor, sku, description.lower(), 
+            account_code, product_category, lookup_hash
+        )
+```
+
+---
+
+## Complete Categorization Flow
+
+```python
+async def categorize_line_items(
+    line_items: List[LineItem],
+    vendor: str,
+    vendor_type: str,
+    entity: str
+) -> List[CategorizedLineItem]:
+    """
+    Categorize line items using cache + AI fallback.
+    """
+    
+    cache = ProductCache()
+    ai_categorizer = AICategorizationService(api_key=settings.ANTHROPIC_API_KEY)
+    
+    categorized = []
+    
+    for item in line_items:
+        # 1. Check cache (FREE)
+        cached = await cache.lookup(vendor, item.sku)
+        
+        if cached:
+            # Cache hit - instant, no AI cost
+            categorized.append(CategorizedLineItem(
+                **item.__dict__,
+                account_code=cached.account_code,
+                product_category=cached.product_category,
+                confidence=cached.user_confidence,
+                source='cached',
+                requires_review=False
+            ))
+            continue
+        
+        # 2. NEW product - call AI ($$)
+        suggestion = await ai_categorizer.suggest_category(
+            vendor=vendor,
+            vendor_type=vendor_type,
+            sku=item.sku,
+            description=item.description,
+            amount=item.line_total,
+            entity=entity
+        )
+        
+        categorized.append(CategorizedLineItem(
+            **item.__dict__,
+            account_code=suggestion['account_code'],
+            product_category=suggestion['product_category'],
+            confidence=suggestion['confidence'],
+            source='ai_suggested',
+            requires_review=True,  # User must approve
+            ai_reasoning=suggestion.get('reasoning'),
+            ai_cost=suggestion.get('cost', 0)
+        ))
+    
+    return categorized
+```
+
+---
+
+## User Approval Workflow
+
+```python
+# When user reviews and approves:
+
+async def approve_line_item_categorization(
+    line_item_id: UUID,
+    approved_account_code: str,
+    approved_category: str
+):
+    """
+    User approved (or edited) the categorization.
+    Store their decision in cache for future use.
+    """
+    
+    # Get line item details
+    item = await db.fetch_one(
+        """
+        SELECT vendor, sku, description
+        FROM receipt_line_items
+        WHERE id = $1
+        """,
+        line_item_id
+    )
+    
+    # Update line item
+    await db.execute(
+        """
+        UPDATE receipt_line_items
+        SET account_code = $1,
+            product_category = $2,
+            requires_review = false,
+            reviewed_at = NOW()
+        WHERE id = $3
+        """,
+        approved_account_code,
+        approved_category,
+        line_item_id
+    )
+    
+    # IMPORTANT: Cache the user's choice
+    cache = ProductCache()
+    await cache.store_user_approval(
+        vendor=item['vendor'],
+        sku=item['sku'],
+        description=item['description'],
+        account_code=approved_account_code,
+        product_category=approved_category
+    )
+    
+    # Future purchases of this SKU will be instant!
+```
+
+---
+
+## Cost Tracking
+
+```python
+# Optional: Track AI costs for budgeting
+
+CREATE TABLE ai_categorization_log (
+    id UUID PRIMARY KEY,
+    receipt_id UUID,
+    line_item_id UUID,
+    vendor TEXT,
+    sku TEXT,
+    description TEXT,
+    cost DECIMAL(10,6),  # Cost in dollars
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+# Query monthly costs:
+SELECT 
+    DATE_TRUNC('month', created_at) as month,
+    COUNT(*) as calls,
+    SUM(cost) as total_cost
+FROM ai_categorization_log
+GROUP BY month
+ORDER BY month DESC;
+```
+
+---
+
+## Privacy Notes
+
+- **AI suggestions are ephemeral** - not stored in database
+- Only the user's **final approved choice** is cached
+- No history of "AI suggested X but user chose Y"
+- User can edit categorizations anytime
+- Batch reclassification tools available
+
+---
+
+## Expected Cache Hit Rates
+
+```
+Month 1: 40% cache hit rate (60% new products)
+Month 2: 70% cache hit rate (30% new)
+Month 3: 85% cache hit rate (15% new)
+Month 6+: 95% cache hit rate (5% new)
+```
+
+**Cost trajectory:**
+- Month 1: ~$10 (learning phase)
+- Month 2: ~$3
+- Month 3: ~$1.50
+- Month 6+: <$1/month
+
+---
+
+## Testing Categorization
+
+```python
+def test_categorization_caching():
+    """Test that caching works correctly"""
+    
+    # First time: Call AI
+    result1 = await categorize_line_item(
+        vendor="Grosnor Distribution",
+        sku="PKM-SV-01",
+        description="Pokemon Scarlet Violet Booster Box"
+    )
+    
+    assert result1.source == 'ai_suggested'
+    assert result1.requires_review == True
+    assert result1.ai_cost > 0
+    
+    # User approves
+    await approve_categorization(result1.id, result1.account_code, result1.product_category)
+    
+    # Second time: Cache hit
+    result2 = await categorize_line_item(
+        vendor="Grosnor Distribution",
+        sku="PKM-SV-01",
+        description="Pokemon Scarlet Violet Booster Box"
+    )
+    
+    assert result2.source == 'cached'
+    assert result2.requires_review == False
+    assert result2.ai_cost == 0  # No cost!
+    assert result2.account_code == result1.account_code
+```
+
+---
+
+This gives Claude Code everything needed to implement smart, cached AI categorization that minimizes costs.

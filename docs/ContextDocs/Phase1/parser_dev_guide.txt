@@ -1,0 +1,460 @@
+# Parser Development Guide
+
+## Quick Context
+
+**Project:** Curly's Books - Accounting software for two NS businesses  
+**Current Phase:** Phase 1 - OCR & Receipt Parsing  
+**OCR Stack:** Tesseract (primary) → AWS Textract (fallback < 90% confidence)  
+**Goal:** Extract line items from receipts, cache SKU categorizations, minimize AI costs
+
+---
+
+## Architecture: Smart Caching
+
+```
+Receipt → OCR → Parse Line Items → For each item:
+                                   ├─ Check SKU cache (DB lookup - free)
+                                   ├─ If cached: Use stored category
+                                   └─ If new: Call AI → User approves → Cache
+```
+
+**Key Principle:** AI only runs on NEW products (~5-10% of items after first month)
+
+---
+
+## Database Schema
+
+### product_mappings (The Cache)
+```sql
+CREATE TABLE product_mappings (
+    id UUID PRIMARY KEY,
+    vendor_canonical TEXT NOT NULL,  -- "GFS Canada"
+    sku TEXT NOT NULL,                -- "12345"
+    description_normalized TEXT,       -- "pepsi 12pk"
+    
+    -- Categorization (user-approved)
+    account_code TEXT NOT NULL,        -- "5100"
+    product_category TEXT,             -- "beverages_pop"
+    
+    -- Learning metadata
+    times_seen INTEGER DEFAULT 1,
+    user_confidence DECIMAL(3,2),
+    
+    lookup_hash TEXT UNIQUE,           -- hash(vendor + sku)
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_product_mappings_lookup ON product_mappings(lookup_hash);
+```
+
+### receipt_line_items
+```sql
+CREATE TABLE receipt_line_items (
+    id UUID PRIMARY KEY,
+    receipt_id UUID NOT NULL REFERENCES receipts(id),
+    
+    -- Extracted data
+    line_number INTEGER,
+    sku TEXT,
+    description TEXT NOT NULL,
+    quantity DECIMAL(10,2),
+    unit_price DECIMAL(10,2),
+    line_total DECIMAL(10,2) NOT NULL,
+    
+    -- Categorization
+    account_code TEXT,
+    product_category TEXT,
+    confidence_score DECIMAL(3,2),
+    
+    -- Flags
+    requires_review BOOLEAN DEFAULT true,
+    reviewed_at TIMESTAMP,
+    
+    created_at TIMESTAMP DEFAULT NOW()
+);
+```
+
+---
+
+## Vendor Parser Specifications
+
+Based on uploaded receipt samples:
+
+### 1. Costco Parser
+
+**Format detected from samples:**
+```
+306657 GATORADE           65.97 Y
+310062 PEPSI 32 PK        28.98 Y
+1009603 NERDS GUMMY       49.98 Y
+```
+
+**Pattern:**
+- SKU: 5-7 digits
+- Description: Variable length, left-aligned
+- Price: Right-aligned with Y/N flag (taxable)
+- Deposits: Separate lines (9490 DEPOSIT/306)
+- Discounts: Lines with "TPD/" prefix (negative amounts)
+
+**Regex:**
+```python
+line_pattern = r'(\d{5,7})\s+(.*?)\s+(\d+\.\d{2})\s+([YN])'
+deposit_pattern = r'(\d{4})\s+DEPOSIT/(\d+)\s+(\d+\.\d{2})'
+discount_pattern = r'(\d+)\s+TPD/.*?\s+(\d+\.\d{2})-'
+```
+
+### 2. Atlantic Superstore Parser
+
+**Format detected from samples:**
+```
+(2)05870322321    NN DRY CLOTH ORI  HMRJ     10.9E
+06038318936       NN IC SNDW VAN    HMRJ      9.9E
+06038318937       NN IC SNDW CHOC   HMRJ      9.9E
+```
+
+**Pattern:**
+- SKU: 11-13 digits, sometimes with (2) prefix for quantity
+- Description: Abbreviated codes (NN = No Name brand)
+- Price: Right-aligned, sometimes "E" suffix instead of "9"
+- Flags: HMRJ (HST taxable), etc.
+
+**Challenges:**
+- OCR often returns "9.9E" instead of "$9.99"
+- Spacing varies wildly
+- Quantity prefix not always clear
+
+**Regex:**
+```python
+line_pattern = r'(?:\((\d+)\))?\s*(\d{11,13})\s+(.*?)\s+(H?M?R?J?)\s+([\d.]+)([E9]?)'
+```
+
+**Cleanup needed:**
+```python
+def fix_price(price_str: str) -> Decimal:
+    # "9.9E" → "9.99"
+    # "10.9E" → "10.99"
+    price_str = price_str.replace('E', '9')
+    return Decimal(price_str)
+```
+
+### 3. The Balcony Candy Shop Parser
+
+**Format detected:**
+```
+NN SODA SALTED                 MRJ       9.37
+SUNSPUN SUN JR. DISP NAP      MRJ      22.35
+REALEMON JUICE                 MRJ      10.76
+```
+
+**Pattern:**
+- No SKU visible (or SKU on different line)
+- Description: Left-aligned
+- Tax code: MRJ, HMRJ, etc.
+- Price: Right-aligned
+
+**Special handling:**
+- Multi-line items (ARCP: 50.00% ($33.99))
+- "HOME MEAL REPLACEMENT" section headers
+- Quantity on separate lines
+
+---
+
+## Base Parser Class
+
+```python
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from decimal import Decimal
+from typing import List, Optional
+import re
+
+@dataclass
+class LineItem:
+    sku: Optional[str]
+    description: str
+    quantity: Decimal = Decimal("1")
+    unit_price: Optional[Decimal] = None
+    line_total: Decimal
+    raw_line: str  # Keep for debugging
+
+class BaseReceiptParser(ABC):
+    """Base class for vendor-specific parsers"""
+    
+    @abstractmethod
+    def detect_format(self, text: str) -> bool:
+        """Check if this parser can handle this receipt"""
+        pass
+    
+    @abstractmethod
+    def parse_line_items(self, text: str) -> List[LineItem]:
+        """Extract line items from receipt text"""
+        pass
+    
+    def normalize_price(self, price_str: str) -> Decimal:
+        """Clean up OCR price errors"""
+        # Remove currency symbols
+        price_str = price_str.replace('$', '').replace(',', '')
+        # Fix common OCR errors
+        price_str = price_str.replace('E', '9').replace('O', '0')
+        return Decimal(price_str)
+```
+
+---
+
+## Example: Costco Parser Implementation
+
+```python
+# packages/parsers/vendors/costco_parser.py
+
+import re
+from decimal import Decimal
+from typing import List
+from .base_parser import BaseReceiptParser, LineItem
+
+class CostcoParser(BaseReceiptParser):
+    """Parser for Costco warehouse receipts"""
+    
+    # Format indicators
+    VENDOR_INDICATORS = [
+        'COSTCO',
+        'COSTCO WHOLESALE',
+        'MONCTON #1345'
+    ]
+    
+    # Patterns
+    LINE_PATTERN = re.compile(
+        r'(\d{5,7})\s+(.*?)\s+(\d+\.\d{2})\s+([YN])',
+        re.MULTILINE
+    )
+    
+    DEPOSIT_PATTERN = re.compile(
+        r'(\d{4})\s+DEPOSIT/(\d+)\s+(\d+\.\d{2})'
+    )
+    
+    DISCOUNT_PATTERN = re.compile(
+        r'(\d+)\s+TPD/(.*?)\s+(\d+\.\d{2})-'
+    )
+    
+    def detect_format(self, text: str) -> bool:
+        """Check if this is a Costco receipt"""
+        text_upper = text.upper()
+        return any(ind in text_upper for ind in self.VENDOR_INDICATORS)
+    
+    def parse_line_items(self, text: str) -> List[LineItem]:
+        """Extract line items from Costco receipt"""
+        items = []
+        
+        # Parse main line items
+        for match in self.LINE_PATTERN.finditer(text):
+            sku = match.group(1)
+            description = match.group(2).strip()
+            price = Decimal(match.group(3))
+            taxable = match.group(4) == 'Y'
+            
+            items.append(LineItem(
+                sku=sku,
+                description=description,
+                line_total=price,
+                raw_line=match.group(0)
+            ))
+        
+        # Parse deposits (separate line items)
+        for match in self.DEPOSIT_PATTERN.finditer(text):
+            items.append(LineItem(
+                sku=None,
+                description=f"Deposit - {match.group(2)}",
+                line_total=Decimal(match.group(3)),
+                raw_line=match.group(0)
+            ))
+        
+        # Parse discounts (negative line items)
+        for match in self.DISCOUNT_PATTERN.finditer(text):
+            items.append(LineItem(
+                sku=match.group(1),
+                description=f"Discount - {match.group(2)}",
+                line_total=-Decimal(match.group(3)),
+                raw_line=match.group(0)
+            ))
+        
+        return items
+```
+
+---
+
+## Parser Dispatcher
+
+```python
+# packages/parsers/vendor_dispatcher.py
+
+from typing import Optional
+from .vendors.costco_parser import CostcoParser
+from .vendors.superstore_parser import SuperstoreParser
+from .vendors.balcony_parser import BalconyParser
+
+class VendorDispatcher:
+    """Route receipts to correct parser based on vendor"""
+    
+    def __init__(self):
+        self.parsers = [
+            CostcoParser(),
+            SuperstoreParser(),
+            BalconyParser(),
+            # Add more parsers here
+        ]
+    
+    def get_parser(self, ocr_text: str, vendor: str = None):
+        """
+        Find appropriate parser for this receipt.
+        
+        Priority:
+        1. If vendor known, try vendor-specific parser first
+        2. Try all parsers' detect_format() method
+        3. Fall back to generic parser
+        """
+        
+        # Try each parser's detection
+        for parser in self.parsers:
+            if parser.detect_format(ocr_text):
+                return parser
+        
+        # Fallback to generic parser
+        return GenericParser()
+```
+
+---
+
+## Testing with Real Receipts
+
+```python
+# tests/test_costco_parser.py
+
+import pytest
+from packages.parsers.vendors.costco_parser import CostcoParser
+
+def test_costco_parser_with_real_receipt():
+    """Test with actual Costco receipt from samples"""
+    
+    receipt_text = """
+    MONCTON #1345
+    306657 GATORADE           65.97 Y
+    9490   DEPOSIT/306         8.40
+    310062 PEPSI 32 PK        28.98 Y
+    1770709 TPD/PEPSI          2.90-
+    """
+    
+    parser = CostcoParser()
+    assert parser.detect_format(receipt_text)
+    
+    items = parser.parse_line_items(receipt_text)
+    
+    # Should find 4 items: Gatorade, deposit, Pepsi, discount
+    assert len(items) == 4
+    
+    # Check Gatorade
+    gatorade = items[0]
+    assert gatorade.sku == "306657"
+    assert gatorade.description == "GATORADE"
+    assert gatorade.line_total == Decimal("65.97")
+    
+    # Check discount is negative
+    discount = items[3]
+    assert discount.line_total < 0
+```
+
+---
+
+## Integration with OCR Pipeline
+
+```python
+# services/worker/tasks/ocr_receipt.py (updated)
+
+from packages.parsers.vendor_dispatcher import VendorDispatcher
+from packages.parsers.vendor_service import VendorRegistry
+from packages.ai.categorizer import ProductCache
+
+@app.task
+async def process_receipt_task(receipt_id, entity, file_path, ...):
+    """Process receipt with vendor-specific parsing"""
+    
+    # 1. OCR (Tesseract → Textract fallback)
+    ocr_result = await ocr_engine.extract(file_path)
+    
+    # 2. Normalize vendor
+    vendor_registry = VendorRegistry()
+    vendor_canonical = await vendor_registry.normalize_vendor_name(
+        extract_vendor_from_text(ocr_result.text)
+    )
+    
+    # 3. Get appropriate parser
+    dispatcher = VendorDispatcher()
+    parser = dispatcher.get_parser(ocr_result.text, vendor_canonical)
+    
+    # 4. Parse line items
+    line_items = parser.parse_line_items(ocr_result.text)
+    
+    # 5. Categorize with caching
+    cache = ProductCache()
+    for item in line_items:
+        # Check cache first
+        cached = await cache.lookup(vendor_canonical, item.sku)
+        
+        if cached:
+            item.account_code = cached.account_code
+            item.product_category = cached.product_category
+            item.requires_review = False
+        else:
+            # Call AI for NEW products only
+            suggestion = await ai_categorizer.suggest(
+                vendor_canonical,
+                item.sku,
+                item.description,
+                entity
+            )
+            item.account_code = suggestion.account_code
+            item.product_category = suggestion.product_category
+            item.requires_review = True  # User must approve
+    
+    # 6. Store in database
+    await store_receipt(receipt_id, vendor_canonical, line_items)
+```
+
+---
+
+## Next Steps for Claude Code
+
+1. **Build Costco parser** using the pattern above
+2. **Build Superstore parser** (handle OCR errors like "9.9E")
+3. **Build generic fallback parser** for unknown vendors
+4. **Create parser tests** using the uploaded receipt samples
+5. **Integrate with existing OCR pipeline**
+
+---
+
+## Files to Create
+
+```
+packages/parsers/vendors/
+├── __init__.py
+├── base_parser.py          # Base class (shown above)
+├── costco_parser.py        # Costco implementation
+├── superstore_parser.py    # Atlantic Superstore
+├── balcony_parser.py       # Balcony Candy Shop
+└── generic_parser.py       # Fallback for unknowns
+
+tests/test_parsers/
+├── test_costco_parser.py
+├── test_superstore_parser.py
+└── fixtures/
+    ├── costco_sample.txt    # OCR output from sample
+    └── superstore_sample.txt
+```
+
+---
+
+## Key Reminders
+
+- ✅ Tesseract → Textract already configured (don't change)
+- ✅ SKU caching minimizes AI calls
+- ✅ Parsers use fuzzy regex for spacing issues
+- ✅ AI only for truly NEW products
+- ✅ User approves all new categorizations before caching

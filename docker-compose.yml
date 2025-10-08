@@ -55,11 +55,12 @@ services:
       - CLOUDFLARE_TUNNEL_ID=${CLOUDFLARE_TUNNEL_ID}
       - CLOUDFLARE_ACCESS_AUD=${CLOUDFLARE_ACCESS_AUD}
       - CLOUDFLARE_TEAM_DOMAIN=${CLOUDFLARE_TEAM_DOMAIN}
-    volumes: 
+    volumes:
       - ./alembic.ini:/app/alembic.ini:ro
       - ./apps/api:/app/apps/api
       - ./packages:/app/packages
       - ./infra:/app/infra
+      - ./vendor-samples:/app/vendor-samples:ro
       - receipt_storage:/srv/curlys-books/objects
       - receipt_library:/library
     ports:
