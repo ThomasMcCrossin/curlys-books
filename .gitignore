@@ -83,7 +83,7 @@ temp/
 ocr_cache/
 
 # Receipts (stored elsewhere)
-/srv/objects/
+/srv/curlys-books/objects/
 /library/
 
 # Backup files

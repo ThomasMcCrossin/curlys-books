@@ -69,10 +69,8 @@ app.conf.update(
     },
 )
 
-# Auto-discover tasks
-app.autodiscover_tasks([
-    "services.worker.tasks",
-])
+# Import tasks explicitly to register them
+from services.worker.tasks import ocr_receipt
 
 
 @worker_process_init.connect

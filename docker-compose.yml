@@ -1,4 +1,3 @@
-version: '3.8'
 
 services:
   postgres:
@@ -51,6 +50,9 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - ENVIRONMENT=${ENVIRONMENT:-development}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - DB_PASSWORD=${DB_PASSWORD}                    # ← ADD THIS
+      - SECRET_KEY=${SECRET_KEY}                      # ← ADD THIS
+      - CLOUDFLARE_TUNNEL_ID=${CLOUDFLARE_TUNNEL_ID}
       - CLOUDFLARE_ACCESS_AUD=${CLOUDFLARE_ACCESS_AUD}
       - CLOUDFLARE_TEAM_DOMAIN=${CLOUDFLARE_TEAM_DOMAIN}
     volumes: 
@@ -58,7 +60,7 @@ services:
       - ./apps/api:/app/apps/api
       - ./packages:/app/packages
       - ./infra:/app/infra
-      - receipt_storage:/srv/objects
+      - receipt_storage:/srv/curlys-books/objects
       - receipt_library:/library
     ports:
       - "127.0.0.1:8000:8000"
@@ -80,6 +82,8 @@ services:
       context: .
       dockerfile: infra/docker/worker/Dockerfile
     container_name: curlys-books-worker
+    env_file:
+      - .env
     restart: unless-stopped
     environment:
       - DATABASE_URL=postgresql://${DB_USER:-curlys_admin}:${DB_PASSWORD}@postgres:5432/${DB_NAME:-curlys_books}
@@ -101,7 +105,7 @@ services:
       - ./services/worker:/app/services/worker
       - ./packages:/app/packages
       - ./infra:/app/infra
-      - receipt_storage:/srv/objects
+      - receipt_storage:/srv/curlys-books/objects
       - receipt_library:/library
       - /tmp/ocr_cache:/tmp/ocr_cache
     depends_on:
