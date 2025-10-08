@@ -110,11 +110,11 @@ async def upload_receipt(
                 task_id=task_id)
     
     return ReceiptUploadResponse(
-        receipt_id=receipt_id,
-        status=ReceiptStatus.PENDING,
-        message="Receipt uploaded and queued for processing",
-        task_id=task.id,
-    )
+         receipt_id=receipt_id,
+         status=ReceiptStatus.PENDING,
+         message="Receipt uploaded and queued for processing",
+         task_id=task_id,
+     )
 
 
 @router.get("/{receipt_id}")
