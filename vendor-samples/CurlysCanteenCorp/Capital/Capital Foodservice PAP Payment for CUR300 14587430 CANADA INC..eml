@@ -1,0 +1,212 @@
+Delivered-To: tom@curlys.ca
+Received: by 2002:a5d:5e07:0:b0:3d4:de55:a34f with SMTP id ce7csp867593wrb;
+        Mon, 8 Sep 2025 06:25:20 -0700 (PDT)
+X-Google-Smtp-Source: AGHT+IGRLacqbpLkAEj3AYp8Zzq/IIf3dx84foHMOMz4SW7L0u0ZAP5sNl2Z9+r9hM7By0gG4rJ7
+X-Received: by 2002:a05:6a20:914f:b0:23d:45b2:8e3c with SMTP id adf61e73a8af0-253763882b0mr11236246637.6.1757337920242;
+        Mon, 08 Sep 2025 06:25:20 -0700 (PDT)
+ARC-Seal: i=2; a=rsa-sha256; t=1757337920; cv=pass;
+        d=google.com; s=arc-20240605;
+        b=e2S8nfW3xCZsofMvQWN3LkIf9r2NXRPEBO737OMXjlzvb1+K7n73NZDUoE4VTV76F2
+         UAJOmfzJrhFAwISNM9DvI7WWvMi1M5BSsSJ20THyTe6utgdg4T0WuWd/2aj3w6J7hDUg
+         Qyg1k7C1R9pz5sgFY6AKlRoSn1ZZ3is3IMsjO2rIhjW27Li7DJYrMdGoHKAqOlIeDh0N
+         SzVuCAu7VkhnUAF8FVrOFz+TcGGJI1nytoSiupyHRfaES0llQ+SLgZSdcrcIqJoDK7MK
+         Bd5eR+3WOKMQrsbt8Ft6Q2ZgOP6RMEs/Ew8pX32TCdHSr8NtjdNOisKxc7NA2Cd/bY+V
+         0U+A==
+ARC-Message-Signature: i=2; a=rsa-sha256; c=relaxed/relaxed; d=google.com; s=arc-20240605;
+        h=mime-version:content-language:accept-language:message-id:date
+         :thread-index:thread-topic:subject:to:from:dkim-signature;
+        bh=h8CRcXs8FVxigMl6LpTZ7FRHVYml7phxHe2ZURDi220=;
+        fh=913XURZs66GY60rdjEELGcO3Sgs6YWpRNkOxfBbzhDU=;
+        b=W7fC81rUOTJrCtdCrkb06opK29QbLGDF6ewNqrCw8yprHkBflztR0rv2LmNftAsM21
+         iFIYIoFRKiuwxhIVDC5x+J2BgLgtN1yOB2qihMKIPMqRifBWjQutDQAn55ethwccwSPJ
+         Ty7L+zpsvWeM/41J9OL7aoo/rNDiApbHzo1eY5yUkT5zB1eb/PBcvqWSVzVOI5MngXsF
+         QA0+j67pcZZ/YjGGJnzmvD9sy327Cm5Wq3BwFVwBqo1fGFGpD8G1Z7+TuUThUSEIuYg7
+         Agdr5nOb1CQT2loQ4wMdrqvVQPrIOLQzjto6DgX1bPNKPzMxQ0iUuGfR/xCK6hbQq9Gr
+         8MNQ==;
+        dara=google.com
+ARC-Authentication-Results: i=2; mx.google.com;
+       dkim=pass header.i=@capitalfoodservice.ca header.s=selector2 header.b=U8VdtJKN;
+       arc=pass (i=1 spf=pass spfdomain=capitalfoodservice.ca dkim=pass dkdomain=capitalfoodservice.ca dmarc=pass fromdomain=capitalfoodservice.ca);
+       spf=pass (google.com: domain of jduarte@capitalfoodservice.ca designates 2a01:111:f403:c104:: as permitted sender) smtp.mailfrom=Jduarte@capitalfoodservice.ca;
+       dmarc=pass (p=NONE sp=NONE dis=NONE) header.from=capitalfoodservice.ca
+Return-Path: <Jduarte@capitalfoodservice.ca>
+Received: from YQZPR01CU011.outbound.protection.outlook.com (mail-canadaeastazlp170100000.outbound.protection.outlook.com. [2a01:111:f403:c104::])
+        by mx.google.com with ESMTPS id d2e1a72fcca58-7722a4de9e2si21826797b3a.296.2025.09.08.06.25.19
+        for <TOM@curlys.ca>
+        (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);
+        Mon, 08 Sep 2025 06:25:20 -0700 (PDT)
+Received-SPF: pass (google.com: domain of jduarte@capitalfoodservice.ca designates 2a01:111:f403:c104:: as permitted sender) client-ip=2a01:111:f403:c104::;
+Authentication-Results: mx.google.com;
+       dkim=pass header.i=@capitalfoodservice.ca header.s=selector2 header.b=U8VdtJKN;
+       arc=pass (i=1 spf=pass spfdomain=capitalfoodservice.ca dkim=pass dkdomain=capitalfoodservice.ca dmarc=pass fromdomain=capitalfoodservice.ca);
+       spf=pass (google.com: domain of jduarte@capitalfoodservice.ca designates 2a01:111:f403:c104:: as permitted sender) smtp.mailfrom=Jduarte@capitalfoodservice.ca;
+       dmarc=pass (p=NONE sp=NONE dis=NONE) header.from=capitalfoodservice.ca
+ARC-Seal: i=1; a=rsa-sha256; s=arcselector10001; d=microsoft.com; cv=none;
+ b=yf4i4/doT2tQcNihoTDLo+xm6NCbw6bKeB8GWTGDURkbl5FRQea90Kuh9ZRIgTKrv5RnLEmPZ7DYt7vjd1qwEKFek+TbRvHHBPxpDHZ03kgpNEhdrMaNk0mf9jcUwnZDUvLIbE5d+scA1vcziP+AzuvWotpsE8HX4AspYRLmvOuHpNNrven2d6jIehTjGOkZPuth1PbZuYYvcDDieRyq2LKtZ2fB44pvroEfghL9hc4lPDZZ/jqzC8lh0NqPhCkXP0y8BylLE+KfQHalZwTvO7IkmaiUvaNRGBy+KR0p/CTB3VAVaMr/XNYLFfl2y3U3qgdgvrnWvnXzTh0l0BFMvA==
+ARC-Message-Signature: i=1; a=rsa-sha256; c=relaxed/relaxed; d=microsoft.com;
+ s=arcselector10001;
+ h=From:Date:Subject:Message-ID:Content-Type:MIME-Version:X-MS-Exchange-AntiSpam-MessageData-ChunkCount:X-MS-Exchange-AntiSpam-MessageData-0:X-MS-Exchange-AntiSpam-MessageData-1;
+ bh=h8CRcXs8FVxigMl6LpTZ7FRHVYml7phxHe2ZURDi220=;
+ b=r0PxTe6/4vbzIR0Nn+p1CGUWXhETKZYaS4kuETw2BkH61mhD6rka87boJIYIRePBwBqH7warAopYhvGrxqChFWaCZQ/3KSSBxcBupIWrmaSAYEJO/2rV3DTvbiURxlSozbXmn0esZHhI8wZfpx7zCAIuuNEt867qZui73rRZihXnyNGgw82SRzQx+I47D563njjmPPi3Lp2Nac/MBAjd0a2fzY3erTjOOm1HUYWBkx0NrsXfd2OmzUTXCRQbErW/01ikWeb/wbFHIJ4crzPU4zUB5bmQa6WSeLdjX7VSZtlxhO1Lgcd1vHF1irlnQuBXgro0UBEXLFctDqNFEKYFfg==
+ARC-Authentication-Results: i=1; mx.microsoft.com 1; spf=pass
+ smtp.mailfrom=capitalfoodservice.ca; dmarc=pass action=none
+ header.from=capitalfoodservice.ca; dkim=pass header.d=capitalfoodservice.ca;
+ arc=none
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=capitalfoodservice.ca;
+ s=selector2;
+ h=From:Date:Subject:Message-ID:Content-Type:MIME-Version:X-MS-Exchange-SenderADCheck;
+ bh=h8CRcXs8FVxigMl6LpTZ7FRHVYml7phxHe2ZURDi220=;
+ b=U8VdtJKN6usxYeIkFEPMZHEM89IqWFCQPzXVAZ/03VLYkPJJ0EDB/TDStzbGEiyKHXyzmB7xaHvdmCCHj5biEq1+620Vm2iSzE40RsTBpr0p5KQ7MPj+69wQ1WBu23aVzJm+GKRdSb0fDJL3DX+AUP4yfJfIZFy+cIrRF33oLP9gygdrnEi8weJa4KS50nIoCAkmIl+cty/UB7zbZRtNYZYvllCyN239ZPFPY1ca6zklo8A2IW7L6+ycss5TrH4jKFKaTeWLmr0R027K85wyCw1L5nWgDTMc7NpTXwo6Ga/CLkFej6HHP2O3SzPD38tZgCAmIsgSag3qG+ko+pnYTg==
+Received: from QB1PR01MB2916.CANPRD01.PROD.OUTLOOK.COM (2603:10b6:c00:3f::18)
+ by YQBPR0101MB8557.CANPRD01.PROD.OUTLOOK.COM (2603:10b6:c01:54::21) with
+ Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id 15.20.9094.22; Mon, 8 Sep
+ 2025 13:24:14 +0000
+Received: from QB1PR01MB2916.CANPRD01.PROD.OUTLOOK.COM
+ ([fe80::3188:8724:1b9d:ca42]) by QB1PR01MB2916.CANPRD01.PROD.OUTLOOK.COM
+ ([fe80::3188:8724:1b9d:ca42%6]) with mapi id 15.20.9094.021; Mon, 8 Sep 2025
+ 13:24:14 +0000
+From: Johana Duarte <Jduarte@capitalfoodservice.ca>
+To: "TOM@CURLYS.CA" <TOM@CURLYS.CA>
+Subject: Capital Foodservice PAP Payment for CUR300 14587430 CANADA INC.
+Thread-Topic: Capital Foodservice PAP Payment for CUR300 14587430 CANADA INC.
+Thread-Index: Adwgw4Xi753Up3aYSUSh3JPYTdb2+Q==
+Date: Mon, 8 Sep 2025 13:24:13 +0000
+Message-ID:
+ <QB1PR01MB29161D26FAD7554A5065FB8EB20CA@QB1PR01MB2916.CANPRD01.PROD.OUTLOOK.COM>
+Accept-Language: en-US
+Content-Language: en-US
+X-MS-Has-Attach:
+X-MS-TNEF-Correlator:
+authentication-results: dkim=none (message not signed)
+ header.d=none;dmarc=none action=none header.from=capitalfoodservice.ca;
+x-ms-publictraffictype: Email
+x-ms-traffictypediagnostic: QB1PR01MB2916:EE_|YQBPR0101MB8557:EE_
+x-ms-office365-filtering-correlation-id: d2929223-bf36-4ed1-f1bd-08ddeedb014f
+x-ms-exchange-senderadcheck: 1
+x-ms-exchange-antispam-relay: 0
+x-microsoft-antispam:
+ BCL:0;ARA:13230040|1800799024|366016|376014|38070700018|19033499003|8096899003|3613699012;
+x-microsoft-antispam-message-info:
+ =?us-ascii?Q?lJZh4p3eVzDhPMNjJjUP0Ffw3iqzh9bYnRF0XfRZEk87tUfEWM4n9mRqRNCP?=
+ =?us-ascii?Q?Gs7WujxLcMlBaL+T7RevGSfM7hlIOKSHlHJHq8fH3OZlgNlUdrVyGLxvjEFM?=
+ =?us-ascii?Q?YIhq4X+OZWAqpM62nEL1cB5HmLk4CAJN0O7G23EOrcyXfdSrNqNyb/pgr5Bs?=
+ =?us-ascii?Q?TtPGbjFH37H61pqhH7atqWd1pN7zn7syxk0G3bh+dJuxCTdWvficqcUyxL1m?=
+ =?us-ascii?Q?Ok95nDyaUiQ+Oww8M08flxS5twvdrIjRriTlWRlN8tx2+JSTm1Zuj+REsosf?=
+ =?us-ascii?Q?l3+i/Fuz4Qn9BHLR/vhtcDUsE1FyA1ONtsn0vICvmUgWO5X9Fxto9bmftq1d?=
+ =?us-ascii?Q?AmyVoIbZdpxMmWjGDMDXpvAvG699vZxFE5c+/mi+ODcVdmna4O8qz3FGiy8k?=
+ =?us-ascii?Q?P8miejK0oFDMLarRYJZt/CucWZX7GhQ9Sa/XKtEclT2HdqGTYMMKfxYMLOpB?=
+ =?us-ascii?Q?LBzGJNWBqeZOfif+RQD14o54EZzWiKtR0oz+AeATRix5w3JHFXDXquV6d/kZ?=
+ =?us-ascii?Q?R9luBoDdWQnqEr3JmyQ3bbdK3ipGjBuDOGUeWdKGcP1D1GremQDnNnmtxAf9?=
+ =?us-ascii?Q?fPeCROoNpR8PEcXp57d5UARr6SZ2wfuKLl5Xm3J/qpJrm4rcEudDvPOLk+iE?=
+ =?us-ascii?Q?4Rsm0ZCYd/NpyvYdUSiPrTjh42b3rq9k4qKS3X8sLzwsL+w7IP77E/cnY7Lz?=
+ =?us-ascii?Q?3et1WEETStppsDHBiPIRxbq8KejU88PrH8PdZ/1sSqN2u8WuVEH59AAliXnx?=
+ =?us-ascii?Q?ZRndvchzTiaDQMSGjRiVot0yvQERM1wf17kK26MzD2PBfrexo/4EiDi5+US9?=
+ =?us-ascii?Q?kowpkf4bNMSiP1n7pK7Gy/HfsAeF/sR9Bye10zu501V1c8fZALd5RPE/LLXv?=
+ =?us-ascii?Q?drGR2EIKBQvhQn/YYqDX6AvbNZt7iUj32JNBClfaafof5TJbHC+iArjttbSi?=
+ =?us-ascii?Q?pnwD3LQF4huamm0qKswDqOGtctP9mBmLIdDKA9LQpzWgX9Hly+xf9qqHWJs2?=
+ =?us-ascii?Q?EEzvSFaL35+9RfutVmpAXx57hyoFOBP7Mal4PPzvOzvoVxCGMGVI6aYWB0DZ?=
+ =?us-ascii?Q?AVkFZyd2iGEkq45ssik+OdBT9nurshwCXU0+0r+6utz8RzqopBiVjXAnh2pG?=
+ =?us-ascii?Q?ie0D/mpIJJ6xIe7JjTtY/Zl2W4tl6ejzFqza1AAxpDWDBekAwUYu8Aa1XGAw?=
+ =?us-ascii?Q?PlAn0mUInAJ3HqI3hv2N8gUtkTW9f2VrMWTLhOXXjJEXRGX8iS1j0EPDoiPJ?=
+ =?us-ascii?Q?EvwW5Vn+klHeIWgtCdux4JUwW+kJ8T/TswaVlKTDyDC63imx4zG9BkxIfxym?=
+ =?us-ascii?Q?2yxpMN/dqjWLRZPFZCXCGxxuLVcpylpZq3DcHwJXlwx4r2FeMVNBndbdkBdP?=
+ =?us-ascii?Q?LxS+1CdOsjCejql0xMCqvZ+p7rcKSiABXEJvteCLsIM+OsuGHjbclhd+/WuS?=
+ =?us-ascii?Q?gntX8xH6gzlWxeChftxb1XjZvZFPZmHRcUz1T6vz5+Z6DH/yqqi216go/cnr?=
+ =?us-ascii?Q?umIlWitocBoaBBaSXp9M8hjB+3yK5D9qXOph?=
+x-forefront-antispam-report:
+ CIP:255.255.255.255;CTRY:;LANG:en;SCL:1;SRV:;IPV:NLI;SFV:NSPM;H:QB1PR01MB2916.CANPRD01.PROD.OUTLOOK.COM;PTR:;CAT:NONE;SFS:(13230040)(1800799024)(366016)(376014)(38070700018)(19033499003)(8096899003)(3613699012);DIR:OUT;SFP:1102;
+x-ms-exchange-antispam-messagedata-chunkcount: 1
+x-ms-exchange-antispam-messagedata-0:
+ =?us-ascii?Q?E/3svzv4LIiTCCaZDXEvaJfksaIS18sbUhwqySf23ccV9dpBKoz2GjXRIpCM?=
+ =?us-ascii?Q?e/cHNncbT3s7zrmp6+FtG0ET7/JPQ65UzZyUojoHM7wLIDWY4rrcpU6leo0K?=
+ =?us-ascii?Q?6R2vMt3bfbyGaA47IPtJiOLOXkojnIhklz+IbZ18xt7VqjvaRxtWug+aGaYi?=
+ =?us-ascii?Q?80dW0OOo9zkWxcFHq4iCpG1p30GZ4aFrf0NZ+Nj88MDlCsR7ClGuW2HRnFiw?=
+ =?us-ascii?Q?FtV+TzjAEQgPOdSO8P7MdWsoVdQiwN7xK43rw0TrtBagLtnJqB/8Mij0tnw2?=
+ =?us-ascii?Q?T22cXNdVtNUcbQVSNjQdno15B8KjT01fA+lHUT2K39jxG+gm9xWu0GMQb586?=
+ =?us-ascii?Q?13TO6BYjA/xGhRinEOKzaDfk5nixpnGTiJcErbjCbX2uX4z41+olefeAAhZ9?=
+ =?us-ascii?Q?9dPMZuE8HsgCKamPJRiyAJKvy8KP6Phhsdc7H2RsX5L6rIMaJWPmAWUPd7NX?=
+ =?us-ascii?Q?2aN5AEGMmMeaCUErD3aR/3B8ndKL8IJjcDDN62JBiiuI/w8a7w8zygJdAzx3?=
+ =?us-ascii?Q?WPBHfKwFVFTfe/CZSfW3svmK3udVCnU1DuUsq/a7bGORrPQJoCvcGsjzmLxR?=
+ =?us-ascii?Q?xiGLY/1v89wf+w1llhWhqI9lD+fUSOAb3AqnQ+wDX5EFrly1KaY0RcWJwGRi?=
+ =?us-ascii?Q?bGb9chmCmblvdw03ksu3SXILtcFb+eQQTI1Ip2VnA5NPB+EF3RjC9R7b/Z6k?=
+ =?us-ascii?Q?eWuDsbYaR0vOCHZOaV6vI6x1ls2Xb0sR+I3hiLtHUvfShxq60A5DQWDvRPC6?=
+ =?us-ascii?Q?nLFwaw8gtNHaIffR6UjimMQ+3P5XRHtD0Ghb2lrWPdpC+YolYOHwUBbXFjBt?=
+ =?us-ascii?Q?Hpk9c30Oggs1ajolYD6+RxLajOSf4tjtuEni/tqH1OemQeZY81wOGlzdgVy7?=
+ =?us-ascii?Q?K8NZYliTjsrsoqnHOs6xkTh0yYz8dJXlG3HUH74HzemtjnnBl+ArhHvmSvzS?=
+ =?us-ascii?Q?uMp/sCc96iK/Dw8PmxF4pye6IpQMK4EE36T0zJ7Lbm8g/5C7Xc7Lp8Mi6PoK?=
+ =?us-ascii?Q?nyJIMd4bawbGtbxEXZWQrGBov8fWiuMSrTR3jKZKSNj4GyrJhmhq6VJBnxon?=
+ =?us-ascii?Q?3zOhoYeTJhZvA3j/JD3FINrUFI5/1wn6cTVsmZVj9U+fRI8/DPs+KQ0qP2tb?=
+ =?us-ascii?Q?2BDX2hpO689UwkvGi914WLkQTCJyhqxAYYBcB6flSkbK8jpTsx8E8CGcMQH7?=
+ =?us-ascii?Q?FgWIUiP0jB7TGR2Q8rsaBAFswYIS6lulo+B3Fl/FiSIFZ3y1EvxsnsYCOebr?=
+ =?us-ascii?Q?sy/nHfSCBnmd2r2InchPMJRRryqt1ZO7B8nzze3xUkWu6CFJq3D3Z2STN1P3?=
+ =?us-ascii?Q?gLwg5qZS/CfAtcpvhCaBuXEwGyGJR8A8ruzn9Rpd7/T7ZO2x5tAiuwJQrvQT?=
+ =?us-ascii?Q?19ttoQUdOyD22wsEKR8HeT4dCwi5/F3jWqOZpl6H9G92RSU67E3vxgvEzBLs?=
+ =?us-ascii?Q?cmq/EhkdRhInT8L7vNIvbEJLcSGU8HVZZjS+t7am2avGYt+BcOgJ5bNkJzW1?=
+ =?us-ascii?Q?imEm/0Lw/AU/MfoBt6HTOveZh392e7wLlql+FePq6rLRUKvVXxkArbUK29Dd?=
+ =?us-ascii?Q?QFefHKDdDakhooocIRF0d6XUTMHeFwQUBmfqvs8zfroeWDL5rBb6ST4j7Q+t?=
+ =?us-ascii?Q?kw=3D=3D?=
+Content-Type: multipart/alternative;
+	boundary="_000_QB1PR01MB29161D26FAD7554A5065FB8EB20CAQB1PR01MB2916CANP_"
+MIME-Version: 1.0
+X-OriginatorOrg: capitalfoodservice.ca
+X-MS-Exchange-CrossTenant-AuthAs: Internal
+X-MS-Exchange-CrossTenant-AuthSource: QB1PR01MB2916.CANPRD01.PROD.OUTLOOK.COM
+X-MS-Exchange-CrossTenant-Network-Message-Id: d2929223-bf36-4ed1-f1bd-08ddeedb014f
+X-MS-Exchange-CrossTenant-originalarrivaltime: 08 Sep 2025 13:24:13.4449
+ (UTC)
+X-MS-Exchange-CrossTenant-fromentityheader: Hosted
+X-MS-Exchange-CrossTenant-id: c57aa6a8-a937-4b4a-9e8b-2faf3f022286
+X-MS-Exchange-CrossTenant-mailboxtype: HOSTED
+X-MS-Exchange-CrossTenant-userprincipalname: 4rskyPDHF5PKXfJT4/Ps4F8oc/cQRBibKpVDSHjiUVWr3aCWpcgSD5ueqdQzfxCQ3uy5Fx4gbmHtgdUrxYkNd+Avik5locNtO0LyP1+HMRQ=
+X-MS-Exchange-Transport-CrossTenantHeadersStamped: YQBPR0101MB8557
+
+--_000_QB1PR01MB29161D26FAD7554A5065FB8EB20CAQB1PR01MB2916CANP_
+Content-Type: text/plain; charset="us-ascii"
+Content-Transfer-Encoding: quoted-printable
+
+Dear THOMAS 902-397-2847.
+
+Your PAP withdrawal amount to Capital Foodservice on 10-Sep-25 is: $ 576.62=
+ for the following Invoices:
+
+2639999 $576.62
+
+Thank you,
+
+Accounts Receivable
+Capital Foodservice
+accountsreceivable@capitalfoodservice.ca
+p 506-858-0728
+f 506-859-7382
+
+--_000_QB1PR01MB29161D26FAD7554A5065FB8EB20CAQB1PR01MB2916CANP_
+Content-Type: text/html; charset="us-ascii"
+Content-Transfer-Encoding: quoted-printable
+
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<html>
+<head>
+<meta http-equiv=3D"Content-Type" content=3D"text/html; charset=3Dus-ascii"=
+>
+<meta name=3D"Generator" content=3D"MS Exchange Server version 16.0.19029.2=
+0136">
+<title></title>
+</head>
+<body>
+<!-- Converted from text/rtf format -->
+<p><font face=3D"Aptos">Dear THOMAS 902-397-2847. </font></p>
+<p><font face=3D"Aptos">Your PAP withdrawal amount to Capital Foodservice o=
+n 10-Sep-25 is: $ 576.62 for the following Invoices:</font>
+</p>
+<p><font face=3D"Aptos">2639999 $576.62</font> </p>
+<p><font face=3D"Aptos">Thank you,</font> </p>
+<p><font face=3D"Aptos">Accounts Receivable</font> <br>
+<font face=3D"Aptos">Capital Foodservice</font> <br>
+<font face=3D"Aptos">accountsreceivable@capitalfoodservice.ca</font> <br>
+<font face=3D"Aptos">p 506-858-0728</font> <br>
+<font face=3D"Aptos">f 506-859-7382</font> </p>
+</body>
+</html>
+
+--_000_QB1PR01MB29161D26FAD7554A5065FB8EB20CAQB1PR01MB2916CANP_--
