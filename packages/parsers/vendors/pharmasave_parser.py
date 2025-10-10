@@ -116,13 +116,37 @@ class PharmasaveParser(BaseReceiptParser):
         # Extract line items
         lines = self._extract_line_items(text)
 
+        # Handle faded/missing line items
+        # If line items don't sum to subtotal, create a placeholder for missing amount
+        line_item_total = sum(line.line_total for line in lines)
+        missing_amount = subtotal - line_item_total
+
+        if abs(missing_amount) > 0.10:  # More than 10 cents missing
+            logger.warning("pharmasave_missing_line_items",
+                          line_item_total=float(line_item_total),
+                          subtotal=float(subtotal),
+                          missing=float(missing_amount),
+                          message="Creating placeholder for unscanned items")
+
+            # Add placeholder line for missing amount
+            lines.append(ReceiptLine(
+                line_index=len(lines),
+                line_type=LineType.ITEM,
+                item_description="[Faded/Unscanned Items - Review Required]",
+                quantity=Decimal('1'),
+                unit_price=missing_amount,
+                line_total=missing_amount,
+                tax_flag=TaxFlag.TAXABLE,  # Assume taxable
+            ))
+
         logger.info("pharmasave_parsed",
                    receipt=receipt_number,
                    date=str(date),
                    total=float(total),
                    subtotal=float(subtotal),
                    hst=float(hst),
-                   lines=len(lines))
+                   lines=len(lines),
+                   has_placeholder=abs(missing_amount) > 0.10)
 
         return ReceiptNormalized(
             entity=entity,
@@ -146,12 +170,15 @@ class PharmasaveParser(BaseReceiptParser):
         """
         Extract line items from Pharmasave receipt.
 
-        Format:
+        Format 1 (with quantity):
         QTY  ITEM #    DESCRIPTION           AMOUNT
         1    10035     SCOTSBURN COFFEE      5.05EN
         1    267219    SCOTSBURN 2% MILK 2L  4.19EN
-        1    759368    SPRITE                6.08TN
-        1    243199    DEPOSIT CANS/BOTTLES  0.60EN
+
+        Format 2 (without quantity - faded receipts):
+        ITEM #  DESCRIPTION              AMOUNT
+        1004921 WALL TAP                 2.30TN
+        996749  SWIFFER STARTER KIT      28.96 TN
 
         Tax flags: EN = HST exempt/zero-rated, TN = HST taxable, TY = ?
 
@@ -160,12 +187,18 @@ class PharmasaveParser(BaseReceiptParser):
         """
         lines = []
 
-        # Pattern to match line items
+        # Pattern 1: With quantity (full format)
         # Format: QTY ITEM# DESCRIPTION AMOUNT(with tax flag)
         # Example: "1    10035     SCOTSBURN COFFEE      5.05EN"
-        line_pattern = r'^\s*(\d+)\s+(\d{5,})\s+(.+?)\s+([0-9.]+)(EN|TN|TY)\s*$'
+        pattern1 = r'^\s*(\d+)\s+(\d{5,})\s+(.+?)\s+([0-9.]+)\s*(EN|TN|TY)\s*$'
 
-        for match in re.finditer(line_pattern, text, re.MULTILINE):
+        # Pattern 2: Without quantity (faded format)
+        # Format: ITEM# DESCRIPTION AMOUNT(with tax flag)
+        # Example: "1004921 WALL TAP            2.30TN"
+        pattern2 = r'^\s*(\d{5,})\s+(.+?)\s+([0-9.]+)\s*(EN|TN|TY)\s*$'
+
+        # Try pattern 1 first (with quantity)
+        for match in re.finditer(pattern1, text, re.MULTILINE):
             quantity = int(match.group(1))
             item_number = match.group(2)
             description = match.group(3).strip()
@@ -192,6 +225,36 @@ class PharmasaveParser(BaseReceiptParser):
                 line_total=amount,
                 tax_flag=tax_flag,
             ))
+
+        # If no matches with pattern 1, try pattern 2 (without quantity)
+        if len(lines) == 0:
+            for match in re.finditer(pattern2, text, re.MULTILINE):
+                item_number = match.group(1)
+                description = match.group(2).strip()
+                amount = Decimal(match.group(3))
+                tax_flag_str = match.group(4)
+
+                # Determine tax flag
+                if tax_flag_str == 'TN' or tax_flag_str == 'TY':
+                    tax_flag = TaxFlag.TAXABLE  # HST applicable
+                else:  # EN
+                    tax_flag = TaxFlag.ZERO_RATED  # Zero-rated (groceries)
+
+                # Deposits are FEE line items, not ITEM line items
+                is_deposit = 'DEPOSIT' in description.upper()
+                line_type = LineType.FEE if is_deposit else LineType.ITEM
+
+                # Default quantity to 1 when not specified
+                lines.append(ReceiptLine(
+                    line_index=len(lines),
+                    line_type=line_type,
+                    vendor_sku=item_number,
+                    item_description=self.clean_description(description),
+                    quantity=Decimal('1'),  # Assume 1 when quantity not shown
+                    unit_price=amount,
+                    line_total=amount,
+                    tax_flag=tax_flag,
+                ))
 
         logger.info("pharmasave_lines_extracted", count=len(lines))
         return lines
