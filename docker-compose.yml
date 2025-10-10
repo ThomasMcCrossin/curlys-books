@@ -106,6 +106,7 @@ services:
       - ./services/worker:/app/services/worker
       - ./packages:/app/packages
       - ./infra:/app/infra
+      - ./vendor-samples:/app/vendor-samples:ro
       - receipt_storage:/srv/curlys-books/objects
       - receipt_library:/library
       - /tmp/ocr_cache:/tmp/ocr_cache
