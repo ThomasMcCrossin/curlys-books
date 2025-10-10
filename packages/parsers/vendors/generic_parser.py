@@ -113,7 +113,7 @@ class GenericParser(BaseReceiptParser):
                 quantity=item.get('quantity', Decimal('1')),
                 unit_price=item.get('unit_price'),
                 line_total=item.get('line_total', Decimal('0')),
-                tax_flag=TaxFlag.UNKNOWN,  # Can't determine reliably
+                tax_flag=TaxFlag.TAXABLE,  # Assume taxable for generic parser
                 account_code='5010',  # Default to inventory
             ))
 
