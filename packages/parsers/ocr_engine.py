@@ -1,6 +1,11 @@
 """
 Tesseract OCR Engine - Primary OCR for receipt processing
 
+Smart text extraction:
+1. For PDFs: Try direct text extraction first (most PDFs have embedded text)
+2. If PDF text extraction fails/poor quality: Fall back to OCR
+3. For images: Always use OCR
+
 Uses pytesseract wrapper for Tesseract OCR engine.
 Processes PDF receipts page-by-page and extracts text with confidence scoring.
 """
@@ -10,6 +15,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Optional
 
+import pypdf
 import structlog
 from pdf2image import convert_from_path
 from PIL import Image
@@ -106,7 +112,10 @@ class TesseractOCR:
         """
         Extract text from PDF file.
 
-        Converts PDF pages to images, then runs OCR on each page.
+        Strategy:
+        1. Try direct text extraction first (most PDFs have embedded text)
+        2. If text extraction yields good content, use it (fast, accurate)
+        3. If no text or poor quality, fall back to OCR (slow, for scanned PDFs)
 
         Args:
             pdf_path: Path to PDF file
@@ -115,6 +124,52 @@ class TesseractOCR:
             OCRResult with combined text from all pages
         """
         try:
+            # STEP 1: Try direct text extraction first (fast path for most PDFs)
+            logger.info("pdf_attempting_text_extraction", file=str(pdf_path))
+
+            try:
+                reader = pypdf.PdfReader(str(pdf_path))
+                page_texts = []
+
+                for page_num, page in enumerate(reader.pages, start=1):
+                    text = page.extract_text()
+                    page_texts.append(text)
+
+                combined_text = "\n\n--- PAGE BREAK ---\n\n".join(page_texts)
+
+                # Check if we got meaningful text
+                # Heuristic: Good PDFs have at least 50 chars and reasonable word density
+                word_count = len(combined_text.split())
+                char_count = len(combined_text.strip())
+
+                if char_count >= 50 and word_count >= 10:
+                    # Text extraction successful!
+                    logger.info("pdf_text_extracted_successfully",
+                               pages=len(reader.pages),
+                               chars=char_count,
+                               words=word_count,
+                               method="direct_extraction")
+
+                    return OCRResult(
+                        text=combined_text,
+                        confidence=1.0,  # Direct text extraction is 100% accurate
+                        page_count=len(reader.pages),
+                        method="pdf_text_extraction"
+                    )
+                else:
+                    logger.warning("pdf_text_extraction_insufficient",
+                                  chars=char_count,
+                                  words=word_count,
+                                  message="PDF appears to be scanned/image-based, falling back to OCR")
+
+            except Exception as e:
+                logger.warning("pdf_text_extraction_failed",
+                              error=str(e),
+                              message="Falling back to OCR")
+
+            # STEP 2: Fall back to OCR for scanned PDFs
+            logger.info("pdf_using_ocr_fallback", file=str(pdf_path))
+
             # Convert PDF to images (one per page)
             images = convert_from_path(
                 str(pdf_path),
