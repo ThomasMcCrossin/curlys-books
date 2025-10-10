@@ -81,9 +81,30 @@ class TextractFallback:
                    size_bytes=file_path.stat().st_size)
 
         try:
-            # Read file bytes
-            with open(file_path, 'rb') as f:
-                file_bytes = f.read()
+            # Convert HEIC to JPG if needed (Textract doesn't support HEIC)
+            if file_path.suffix.lower() in ['.heic', '.heif']:
+                from PIL import Image
+                from pillow_heif import register_heif_opener
+                import io
+
+                register_heif_opener()
+
+                logger.info("converting_heic_to_jpg", file=str(file_path))
+
+                # Load HEIC and convert to JPG
+                img = Image.open(file_path)
+                rgb_img = img.convert('RGB') if img.mode != 'RGB' else img
+
+                # Convert to JPG bytes
+                buffer = io.BytesIO()
+                rgb_img.save(buffer, format='JPEG', quality=95)
+                file_bytes = buffer.getvalue()
+
+                logger.info("heic_converted", original_size=file_path.stat().st_size, jpg_size=len(file_bytes))
+            else:
+                # Read file bytes directly
+                with open(file_path, 'rb') as f:
+                    file_bytes = f.read()
 
             # Call Textract
             response = self.client.detect_document_text(
@@ -106,8 +127,9 @@ class TextractFallback:
             avg_confidence = sum(confidences) / len(confidences) if confidences else 0
             avg_confidence = avg_confidence / 100  # Convert from 0-100 to 0-1
 
-            # Estimate page count (Textract doesn't provide this for single-page detection)
-            page_count = len(response.get('DocumentMetadata', {}).get('Pages', 1))
+            # Get page count from metadata (defaults to 1 if not provided)
+            doc_metadata = response.get('DocumentMetadata', {})
+            page_count = doc_metadata.get('Pages', 1) if isinstance(doc_metadata.get('Pages'), int) else 1
 
             logger.info("textract_complete",
                        blocks=len(text_blocks),
