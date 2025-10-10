@@ -157,21 +157,69 @@ class VendorRegistry:
         # Fallback to generic category
         return "Operating Expenses"
     
+    async def extract_vendor_from_text(self, ocr_text: str) -> Optional[str]:
+        """
+        Extract vendor name from OCR text (usually in first few lines).
+
+        Args:
+            ocr_text: Raw OCR text from receipt
+
+        Returns:
+            Vendor name guess or None
+        """
+        if not ocr_text:
+            return None
+
+        # Try first 5 lines
+        lines = [line.strip() for line in ocr_text.split('\n')[:5] if line.strip()]
+
+        # Look for common vendor indicators
+        for line in lines:
+            # Skip very short lines (noise)
+            if len(line) < 3:
+                continue
+
+            # Skip lines that are just numbers or dates
+            if line.replace('-', '').replace('/', '').replace('.', '').isdigit():
+                continue
+
+            # This is likely the vendor name
+            return line
+
+        return None
+
+    async def get_typical_entity(self, vendor_name: str) -> Optional[str]:
+        """
+        Get typical entity assignment for vendor.
+
+        Args:
+            vendor_name: Vendor name
+
+        Returns:
+            'corp', 'soleprop', 'both', or None if vendor not in registry
+        """
+        vendor_info = await self.get_vendor_info(vendor_name)
+
+        if vendor_info:
+            return vendor_info.typical_entity
+
+        return None
+
     async def get_parser_format(self, vendor_name: str) -> Optional[str]:
         """
         Get receipt format identifier for vendor.
-        
+
         Args:
             vendor_name: Vendor name
-            
+
         Returns:
             Receipt format identifier (e.g., 'gfs_invoice', 'costco_receipt')
         """
         vendor_info = await self.get_vendor_info(vendor_name)
-        
+
         if vendor_info:
             return vendor_info.receipt_format
-        
+
         return None
     
     async def record_transaction(

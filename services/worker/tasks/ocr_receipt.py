@@ -118,7 +118,7 @@ async def process_receipt_task(
                 logger.info("using_tesseract_despite_low_confidence",
                            receipt_id=receipt_id)
 
-        # Step 2: Normalize vendor name
+        # Step 2: Normalize vendor name and get entity assignment
         logger.info("ocr_step_2_normalizing_vendor", receipt_id=receipt_id)
 
         vendor_registry = VendorRegistry()
@@ -127,10 +127,25 @@ async def process_receipt_task(
 
         if vendor_guess:
             vendor_canonical = await vendor_registry.normalize_vendor_name(vendor_guess)
+            # Get typical_entity from vendor_registry
+            vendor_entity = await vendor_registry.get_typical_entity(vendor_canonical)
+
             logger.info("vendor_normalized",
                        receipt_id=receipt_id,
                        vendor_guess=vendor_guess,
-                       vendor_canonical=vendor_canonical)
+                       vendor_canonical=vendor_canonical,
+                       typical_entity=vendor_entity)
+
+            # Override entity if vendor has a typical_entity (unless it's 'both')
+            if vendor_entity and vendor_entity != 'both':
+                if vendor_entity != entity:
+                    logger.warning("entity_mismatch",
+                                 receipt_id=receipt_id,
+                                 uploaded_as=entity,
+                                 vendor_typical=vendor_entity,
+                                 vendor=vendor_canonical,
+                                 message=f"Receipt uploaded as {entity} but {vendor_canonical} typically belongs to {vendor_entity}")
+                    # TODO: In production, this should require manual review or reassignment
         else:
             vendor_canonical = None
             logger.warning("vendor_not_detected",
