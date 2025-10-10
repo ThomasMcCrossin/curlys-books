@@ -12,6 +12,8 @@ Flow:
 Phase 1 Complete!
 """
 import os
+import shutil
+from pathlib import Path
 from typing import Dict, Any
 from uuid import UUID
 
@@ -28,6 +30,9 @@ from packages.parsers.vendor_dispatcher import parse_receipt
 from packages.parsers.vendor_service import VendorRegistry
 
 logger = structlog.get_logger()
+
+# Storage configuration
+RECEIPT_STORAGE_ROOT = os.getenv('RECEIPT_STORAGE_PATH', '/srv/curlys-books/objects')
 
 # Configuration from environment
 TESSERACT_CONFIDENCE_THRESHOLD = float(os.getenv('TESSERACT_CONFIDENCE_THRESHOLD', '0.90'))
@@ -166,8 +171,25 @@ async def process_receipt_task(
                 "requires_review": True,
             }
 
-        # Step 4: Store results in database
-        logger.info("ocr_step_4_storing_results", receipt_id=receipt_id)
+        # Step 4: Reorganize files to readable folder structure
+        logger.info("ocr_step_4_reorganizing_files", receipt_id=receipt_id)
+
+        new_file_path = reorganize_receipt_files(
+            receipt_id=receipt_id,
+            entity=entity,
+            vendor=vendor_canonical or parsed_receipt.vendor_guess or "Unknown",
+            date=parsed_receipt.purchase_date,
+            total=parsed_receipt.total,
+            current_path=file_path
+        )
+
+        logger.info("files_reorganized",
+                   receipt_id=receipt_id,
+                   old_path=file_path,
+                   new_path=new_file_path)
+
+        # Step 5: Store results in database
+        logger.info("ocr_step_5_storing_results", receipt_id=receipt_id)
 
         async for session in get_db_session():
             try:
@@ -177,7 +199,8 @@ async def process_receipt_task(
                     entity=entity,
                     ocr_result=ocr_result,
                     parsed_receipt=parsed_receipt,
-                    vendor_canonical=vendor_canonical
+                    vendor_canonical=vendor_canonical,
+                    file_path=new_file_path
                 )
 
                 await session.commit()
@@ -224,13 +247,93 @@ async def process_receipt_task(
         raise
 
 
+def reorganize_receipt_files(
+    receipt_id: str,
+    entity: str,
+    vendor: str,
+    date,
+    total,
+    current_path: str
+) -> str:
+    """
+    Reorganize receipt files into readable folder structure.
+
+    Moves from: /objects/{entity}/{uuid}/original.heic
+    To: /objects/{entity}/{vendor}/{date}_{total}/original.heic
+
+    Args:
+        receipt_id: Receipt UUID
+        entity: Entity type (corp or soleprop)
+        vendor: Vendor canonical name
+        date: Purchase date
+        total: Receipt total (with HST)
+        current_path: Current file path
+
+    Returns:
+        New file path
+
+    Example:
+        /srv/curlys-books/objects/corp/Pepsi/2025-10-07_1381.76/original.heic
+    """
+    from datetime import date as date_type
+    from decimal import Decimal
+
+    # Clean vendor name for folder (remove special characters)
+    vendor_clean = "".join(c if c.isalnum() or c in [' ', '-'] else '' for c in vendor)
+    vendor_clean = vendor_clean.strip().replace(' ', '-')
+
+    # Format date
+    if isinstance(date, date_type):
+        date_str = date.strftime('%Y-%m-%d')
+    else:
+        date_str = str(date) if date else "NODATE"
+
+    # Format total
+    if isinstance(total, Decimal):
+        total_str = f"{float(total):.2f}"
+    else:
+        total_str = f"{total:.2f}" if total else "0.00"
+
+    # Build new folder structure: /entity/vendor/date_total/
+    folder_name = f"{date_str}_{total_str}"
+    new_dir = Path(RECEIPT_STORAGE_ROOT) / entity / vendor_clean / folder_name
+    new_dir.mkdir(parents=True, exist_ok=True)
+
+    # Get current file directory and extension
+    current_file = Path(current_path)
+    ext = current_file.suffix
+
+    # Move all files from old location to new
+    old_dir = current_file.parent
+
+    if old_dir.exists():
+        for file in old_dir.glob('*'):
+            new_file_path = new_dir / file.name
+            shutil.move(str(file), str(new_file_path))
+            logger.info("file_moved",
+                       old=str(file),
+                       new=str(new_file_path))
+
+        # Remove old directory
+        try:
+            old_dir.rmdir()
+            logger.info("old_directory_removed", path=str(old_dir))
+        except Exception as e:
+            logger.warning("failed_to_remove_old_dir", path=str(old_dir), error=str(e))
+
+    # Return new path to original file
+    new_file_path = new_dir / f"original{ext}"
+    return str(new_file_path)
+
+
 async def store_receipt_results(
     session: AsyncSession,
     receipt_id: UUID,
     entity: str,
     ocr_result,
     parsed_receipt,
-    vendor_canonical: str
+    vendor_canonical: str,
+    file_path: str = None
 ):
     """
     Store OCR and parsing results in database.
@@ -252,6 +355,24 @@ async def store_receipt_results(
     schema_name = f'curlys_{entity}'
 
     # Update receipts table
+    update_fields = {
+        "receipt_id": receipt_id,
+        "vendor": parsed_receipt.vendor_guess,
+        "vendor_canonical": vendor_canonical,
+        "total": parsed_receipt.total,
+        "ocr_confidence": ocr_result.confidence,
+        "ocr_method": ocr_result.method,
+        "extracted_text": ocr_result.text[:10000],  # Truncate if too long
+        "purchase_date": parsed_receipt.purchase_date,
+    }
+
+    # Add file_path if provided
+    if file_path:
+        update_fields["file_path"] = file_path
+        file_path_sql = ", file_path = :file_path"
+    else:
+        file_path_sql = ""
+
     await session.execute(
         text(f"""
             UPDATE {schema_name}.receipts
@@ -263,20 +384,12 @@ async def store_receipt_results(
                 ocr_confidence = :ocr_confidence,
                 ocr_method = :ocr_method,
                 extracted_text = :extracted_text,
-                purchase_date = :purchase_date,
+                purchase_date = :purchase_date
+                {file_path_sql},
                 updated_at = NOW()
             WHERE id = :receipt_id
         """),
-        {
-            "receipt_id": receipt_id,
-            "vendor": parsed_receipt.vendor_guess,
-            "vendor_canonical": vendor_canonical,
-            "total": parsed_receipt.total,
-            "ocr_confidence": ocr_result.confidence,
-            "ocr_method": ocr_result.method,
-            "extracted_text": ocr_result.text[:10000],  # Truncate if too long
-            "purchase_date": parsed_receipt.date,
-        }
+        update_fields
     )
 
     # Insert line items
