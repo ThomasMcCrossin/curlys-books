@@ -49,11 +49,48 @@ account_code,account_name,account_type,parent_code,gifi_code,t2125_line,is_activ
 4400,Tip Income,revenue,,8000,,TRUE,FALSE,FALSE
 4900,Sales Returns & Allowances,revenue,,8000,,TRUE,FALSE,FALSE
 5000,COGS - Food,expense,,8300,8518,TRUE,TRUE,FALSE
+5001,COGS - Food - Hot Dogs,expense,5000,8300,8518,TRUE,TRUE,FALSE
+5002,COGS - Food - Sandwiches,expense,5000,8300,8518,TRUE,TRUE,FALSE
+5003,COGS - Food - Pizza,expense,5000,8300,8518,TRUE,TRUE,FALSE
+5004,COGS - Food - Frozen,expense,5000,8300,8518,TRUE,TRUE,FALSE
+5005,COGS - Food - Bakery,expense,5000,8300,8518,TRUE,TRUE,FALSE
+5006,COGS - Food - Dairy,expense,5000,8300,8518,TRUE,TRUE,FALSE
+5007,COGS - Food - Meat/Deli,expense,5000,8300,8518,TRUE,TRUE,FALSE
+5008,COGS - Food - Produce,expense,5000,8300,8518,TRUE,TRUE,FALSE
+5009,COGS - Food - Other,expense,5000,8300,8518,TRUE,TRUE,FALSE
 5010,COGS - Beverage,expense,,8300,8518,TRUE,TRUE,FALSE
+5011,COGS - Beverage - Soda,expense,5010,8300,8518,TRUE,TRUE,FALSE
+5012,COGS - Beverage - Water,expense,5010,8300,8518,TRUE,TRUE,FALSE
+5013,COGS - Beverage - Energy Drinks,expense,5010,8300,8518,TRUE,TRUE,FALSE
+5014,COGS - Beverage - Sports Drinks,expense,5010,8300,8518,TRUE,TRUE,FALSE
+5015,COGS - Beverage - Juice,expense,5010,8300,8518,TRUE,TRUE,FALSE
+5016,COGS - Beverage - Coffee/Tea,expense,5010,8300,8518,TRUE,TRUE,FALSE
+5017,COGS - Beverage - Milk Products,expense,5010,8300,8518,TRUE,TRUE,FALSE
+5018,COGS - Beverage - Alcohol,expense,5010,8300,8518,TRUE,TRUE,FALSE
+5019,COGS - Beverage - Other,expense,5010,8300,8518,TRUE,TRUE,FALSE
 5020,COGS - Supplements,expense,,8300,8518,TRUE,TRUE,FALSE
+5021,COGS - Supplements - Protein,expense,5020,8300,8518,TRUE,TRUE,FALSE
+5022,COGS - Supplements - Vitamins,expense,5020,8300,8518,TRUE,TRUE,FALSE
+5023,COGS - Supplements - Pre-Workout,expense,5020,8300,8518,TRUE,TRUE,FALSE
+5024,COGS - Supplements - Recovery,expense,5020,8300,8518,TRUE,TRUE,FALSE
+5025,COGS - Supplements - Sports Nutrition,expense,5020,8300,8518,TRUE,TRUE,FALSE
+5029,COGS - Supplements - Other,expense,5020,8300,8518,TRUE,TRUE,FALSE
 5030,COGS - Retail Goods,expense,,8300,8518,TRUE,TRUE,FALSE
+5031,COGS - Retail - Snacks/Chips,expense,5030,8300,8518,TRUE,TRUE,FALSE
+5032,COGS - Retail - Candy/Chocolate,expense,5030,8300,8518,TRUE,TRUE,FALSE
+5033,COGS - Retail - Health Products,expense,5030,8300,8518,TRUE,TRUE,FALSE
+5034,COGS - Retail - Accessories,expense,5030,8300,8518,TRUE,TRUE,FALSE
+5035,COGS - Retail - Apparel,expense,5030,8300,8518,TRUE,TRUE,FALSE
+5039,COGS - Retail - Other,expense,5030,8300,8518,TRUE,TRUE,FALSE
 5100,Freight In,expense,,8300,8518,TRUE,TRUE,FALSE
 5200,Packaging & Supplies,expense,,8810,8810,TRUE,TRUE,FALSE
+5201,Packaging - Containers/Cups,expense,5200,8810,8810,TRUE,TRUE,FALSE
+5202,Packaging - Bags/Wrapping,expense,5200,8810,8810,TRUE,TRUE,FALSE
+5203,Packaging - Utensils/Straws,expense,5200,8810,8810,TRUE,TRUE,FALSE
+5204,Supplies - Cleaning,expense,5200,8810,8810,TRUE,TRUE,FALSE
+5205,Supplies - Paper Products,expense,5200,8810,8810,TRUE,TRUE,FALSE
+5206,Supplies - Kitchen,expense,5200,8810,8810,TRUE,TRUE,FALSE
+5209,Supplies - Other,expense,5200,8810,8810,TRUE,TRUE,FALSE
 5300,Merchant Processing Fees,expense,,8810,8860,TRUE,FALSE,FALSE
 5310,Shopify Payment Fees,expense,,8810,8860,TRUE,FALSE,FALSE
 5320,Chargebacks & Disputes,expense,,8810,8860,TRUE,FALSE,FALSE
