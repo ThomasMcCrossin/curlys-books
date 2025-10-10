@@ -23,6 +23,7 @@ from packages.parsers.vendors.costco_parser import CostcoParser
 from packages.parsers.vendors.grosnor_parser import GrosnorParser
 from packages.parsers.vendors.superstore_parser import SuperstoreParser
 from packages.parsers.vendors.pepsi_parser import PepsiParser
+from packages.parsers.vendors.pharmasave_parser import PharmasaveParser
 from packages.parsers.vendors.generic_parser import GenericParser
 
 logger = structlog.get_logger()
@@ -51,6 +52,7 @@ class VendorDispatcher:
             GFSParser(),          # $40.6K - Corp food service
             PepsiParser(),        # Pepsi Beverages - Corp
             SuperstoreParser(),   # Atlantic Superstore
+            PharmasaveParser(),   # MacQuarries Pharmasave - Corp
             # GenericParser MUST be last - it always matches
             GenericParser(),      # Fallback for unknown vendors
         ]
