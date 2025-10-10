@@ -116,28 +116,12 @@ class PharmasaveParser(BaseReceiptParser):
         # Extract line items
         lines = self._extract_line_items(text)
 
-        # Handle faded/missing line items
-        # If line items don't sum to subtotal, create a placeholder for missing amount
-        line_item_total = sum(line.line_total for line in lines)
-        missing_amount = subtotal - line_item_total
-
-        if abs(missing_amount) > 0.10:  # More than 10 cents missing
-            logger.warning("pharmasave_missing_line_items",
-                          line_item_total=float(line_item_total),
-                          subtotal=float(subtotal),
-                          missing=float(missing_amount),
-                          message="Creating placeholder for unscanned items")
-
-            # Add placeholder line for missing amount
-            lines.append(ReceiptLine(
-                line_index=len(lines),
-                line_type=LineType.ITEM,
-                item_description="[Faded/Unscanned Items - Review Required]",
-                quantity=Decimal('1'),
-                unit_price=missing_amount,
-                line_total=missing_amount,
-                tax_flag=TaxFlag.TAXABLE,  # Assume taxable
-            ))
+        # Handle faded/missing line items (thermal receipt fade is common)
+        lines = self.handle_missing_line_items(
+            lines=lines,
+            subtotal=subtotal,
+            vendor_name="MacQuarries Pharmasave"
+        )
 
         logger.info("pharmasave_parsed",
                    receipt=receipt_number,
@@ -145,8 +129,7 @@ class PharmasaveParser(BaseReceiptParser):
                    total=float(total),
                    subtotal=float(subtotal),
                    hst=float(hst),
-                   lines=len(lines),
-                   has_placeholder=abs(missing_amount) > 0.10)
+                   lines=len(lines))
 
         return ReceiptNormalized(
             entity=entity,

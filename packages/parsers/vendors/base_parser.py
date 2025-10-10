@@ -17,7 +17,10 @@ import structlog
 
 from packages.common.schemas.receipt_normalized import (
     ReceiptNormalized,
+    ReceiptLine,
     EntityType,
+    LineType,
+    TaxFlag,
 )
 
 logger = structlog.get_logger()
@@ -169,6 +172,71 @@ class BaseReceiptParser(ABC):
             if re.search(pattern, text_upper):
                 return True
         return False
+
+    def handle_missing_line_items(
+        self,
+        lines: list[ReceiptLine],
+        subtotal: Decimal,
+        tolerance: Decimal = Decimal('0.10'),
+        vendor_name: Optional[str] = None
+    ) -> list[ReceiptLine]:
+        """
+        Handle faded/missing line items by creating placeholder for difference.
+
+        Thermal receipts fade over time, making some line items unreadable.
+        When line items don't sum to subtotal (beyond tolerance), create a
+        placeholder line item for the missing amount.
+
+        This ensures totals always validate while allowing user to fix details
+        in the frontend.
+
+        Args:
+            lines: List of extracted line items
+            subtotal: Receipt subtotal (from footer)
+            tolerance: Maximum acceptable difference (default $0.10)
+            vendor_name: Vendor name for logging (optional)
+
+        Returns:
+            Updated list of lines (may include placeholder)
+        """
+        # Sum ITEM and FEE line types (both contribute to subtotal)
+        # ITEM = products (COGS), FEE = deposits/environmental charges
+        # Exclude DISCOUNT, TAX, etc.
+        line_item_total = sum(
+            line.line_total for line in lines
+            if line.line_type in [LineType.ITEM, LineType.FEE]
+        )
+
+        missing_amount = subtotal - line_item_total
+
+        if abs(missing_amount) > tolerance:
+            logger.warning(
+                "missing_line_items_detected",
+                vendor=vendor_name,
+                line_item_total=float(line_item_total),
+                subtotal=float(subtotal),
+                missing=float(missing_amount),
+                message="Creating placeholder for unscanned items"
+            )
+
+            # Add placeholder line for missing amount
+            lines.append(ReceiptLine(
+                line_index=len(lines),
+                line_type=LineType.ITEM,
+                item_description="[Faded/Unscanned Items - Review Required]",
+                quantity=Decimal('1'),
+                unit_price=missing_amount,
+                line_total=missing_amount,
+                tax_flag=TaxFlag.TAXABLE,  # Assume taxable (user can adjust)
+            ))
+
+            logger.info(
+                "placeholder_created",
+                vendor=vendor_name,
+                placeholder_amount=float(missing_amount)
+            )
+
+        return lines
 
 
 class ParserNotApplicableError(Exception):
