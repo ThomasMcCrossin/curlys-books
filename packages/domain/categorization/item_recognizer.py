@@ -131,7 +131,7 @@ class ItemRecognizer:
         # Call Claude API
         try:
             response = await self.client.messages.create(
-                model="claude-3-5-sonnet-20241022",
+                model="claude-3-7-sonnet-20250219",  # Latest Sonnet 3.7 (cost-effective, fast)
                 max_tokens=500,
                 temperature=0.0,  # Deterministic for consistency
                 messages=[

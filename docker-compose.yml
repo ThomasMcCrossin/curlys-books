@@ -60,10 +60,13 @@ services:
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - AWS_TEXTRACT_REGION=${AWS_TEXTRACT_REGION:-us-east-1}
+      # Anthropic Claude (for AI categorization)
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
     volumes:
       - ./alembic.ini:/app/alembic.ini:ro
       - ./apps/api:/app/apps/api
       - ./packages:/app/packages
+      - ./scripts:/app/scripts
       - ./infra:/app/infra
       - ./vendor-samples:/app/vendor-samples:ro
       - receipt_storage:/srv/curlys-books/objects
@@ -110,6 +113,7 @@ services:
     volumes:
       - ./services/worker:/app/services/worker
       - ./packages:/app/packages
+      - ./scripts:/app/scripts
       - ./infra:/app/infra
       - ./vendor-samples:/app/vendor-samples:ro
       - receipt_storage:/srv/curlys-books/objects

@@ -18,10 +18,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import structlog
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker
 
 from packages.common.config import get_settings
+from packages.common.database import sessionmanager
 from packages.domain.categorization.categorization_service import categorization_service
 
 logger = structlog.get_logger()
@@ -31,11 +30,8 @@ async def main():
     """Test categorization with sample line items."""
     settings = get_settings()
 
-    # Create async database session
-    engine = create_async_engine(settings.database_url, echo=False)
-    async_session_maker = sessionmaker(
-        engine, class_=AsyncSession, expire_on_commit=False
-    )
+    # Initialize database session manager
+    sessionmanager.init(settings.database_url)
 
     # Test cases covering different product categories
     test_items = [
@@ -102,7 +98,7 @@ async def main():
     print("=" * 80)
     print()
 
-    async with async_session_maker() as db:
+    async with sessionmanager.session() as db:
         total_cost = Decimal("0")
         cache_hits = 0
         ai_calls = 0
@@ -212,7 +208,7 @@ async def main():
             else:
                 print("✗ Some items were not cached (expected for items without SKUs)")
 
-    await engine.dispose()
+    await sessionmanager.close()
 
 
 if __name__ == "__main__":

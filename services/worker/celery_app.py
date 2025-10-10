@@ -6,6 +6,7 @@ from celery.signals import worker_process_init, worker_process_shutdown
 import structlog
 
 from packages.common.config import get_settings
+from packages.common.database import sessionmanager
 
 logger = structlog.get_logger()
 settings = get_settings()
@@ -79,11 +80,23 @@ def init_worker(**kwargs):
     logger.info("celery_worker_starting",
                 concurrency=kwargs.get("concurrency", "unknown"))
 
+    # Initialize database session manager for async tasks
+    sessionmanager.init(settings.database_url)
+    logger.info("celery_database_initialized")
+
 
 @worker_process_shutdown.connect
 def shutdown_worker(**kwargs):
     """Clean up worker process"""
     logger.info("celery_worker_shutting_down")
+
+    # Close database connections
+    import asyncio
+    try:
+        asyncio.get_event_loop().run_until_complete(sessionmanager.close())
+        logger.info("celery_database_closed")
+    except Exception as e:
+        logger.error("celery_database_close_failed", error=str(e))
 
 
 if __name__ == "__main__":
