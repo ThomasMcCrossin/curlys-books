@@ -237,6 +237,7 @@ FOOD CATEGORIES:
 - food_dairy: Cheese, yogurt, butter (not milk drinks)
 - food_meat: Meat, deli products
 - food_produce: Fruits, vegetables
+- food_oil: Cooking oils, fats, shortening (canola, vegetable, olive oil, lard)
 - food_condiment: Ketchup, mustard, mayo, sauces
 - food_pantry: Canned goods, pasta, rice, spices
 - food_other: Other food items

@@ -57,7 +57,8 @@ account_code,account_name,account_type,parent_code,gifi_code,t2125_line,is_activ
 5006,COGS - Food - Dairy,expense,5000,8300,8518,TRUE,TRUE,FALSE
 5007,COGS - Food - Meat/Deli,expense,5000,8300,8518,TRUE,TRUE,FALSE
 5008,COGS - Food - Produce,expense,5000,8300,8518,TRUE,TRUE,FALSE
-5009,COGS - Food - Other,expense,5000,8300,8518,TRUE,TRUE,FALSE
+5009,COGS - Food - Cooking Oil/Fats,expense,5000,8300,8518,TRUE,TRUE,FALSE
+5099,COGS - Food - Other,expense,5000,8300,8518,TRUE,TRUE,FALSE
 5010,COGS - Beverage,expense,,8300,8518,TRUE,TRUE,FALSE
 5011,COGS - Beverage - Soda,expense,5010,8300,8518,TRUE,TRUE,FALSE
 5012,COGS - Beverage - Water,expense,5010,8300,8518,TRUE,TRUE,FALSE

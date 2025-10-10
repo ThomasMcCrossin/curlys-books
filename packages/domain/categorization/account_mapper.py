@@ -34,7 +34,7 @@ class ProductCategory(str, Enum):
     These are detailed categories for AI training and analytics.
     Multiple categories can map to the same GL account.
     """
-    # === FOOD (5000-5009) ===
+    # === FOOD (5000-5009, 5099) ===
     FOOD_HOTDOG = "food_hotdog"
     FOOD_SANDWICH = "food_sandwich"
     FOOD_PIZZA = "food_pizza"
@@ -43,6 +43,7 @@ class ProductCategory(str, Enum):
     FOOD_DAIRY = "food_dairy"
     FOOD_MEAT = "food_meat"
     FOOD_PRODUCE = "food_produce"
+    FOOD_OIL = "food_oil"  # Cooking oils and fats
     FOOD_CONDIMENT = "food_condiment"
     FOOD_PANTRY = "food_pantry"
     FOOD_OTHER = "food_other"
@@ -129,9 +130,10 @@ class AccountMapper:
         ProductCategory.FOOD_DAIRY: "5006",
         ProductCategory.FOOD_MEAT: "5007",
         ProductCategory.FOOD_PRODUCE: "5008",
-        ProductCategory.FOOD_CONDIMENT: "5009",
-        ProductCategory.FOOD_PANTRY: "5009",
-        ProductCategory.FOOD_OTHER: "5009",
+        ProductCategory.FOOD_OIL: "5009",  # Cooking oils and fats
+        ProductCategory.FOOD_CONDIMENT: "5099",
+        ProductCategory.FOOD_PANTRY: "5099",
+        ProductCategory.FOOD_OTHER: "5099",
 
         # BEVERAGE → Granular sub-accounts
         ProductCategory.BEVERAGE_SODA: "5011",
@@ -194,7 +196,8 @@ class AccountMapper:
         "5006": "COGS - Food - Dairy",
         "5007": "COGS - Food - Meat/Deli",
         "5008": "COGS - Food - Produce",
-        "5009": "COGS - Food - Other",
+        "5009": "COGS - Food - Cooking Oil/Fats",
+        "5099": "COGS - Food - Other",
         "5011": "COGS - Beverage - Soda",
         "5012": "COGS - Beverage - Water",
         "5013": "COGS - Beverage - Energy Drinks",
