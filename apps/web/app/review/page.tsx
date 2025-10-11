@@ -334,7 +334,7 @@ export default function ReviewQueuePage() {
                         </div>
                         <div className="relative bg-gray-100">
                           <img
-                            src={`${apiUrl}/api/v1/receipts/${item.details.receipt_id}/file?type=normalized`}
+                            src={`${apiUrl}/api/v1/receipts/${item.details.receipt_id}/file?file_type=normalized`}
                             alt="Receipt"
                             className="w-full h-auto rounded-b-lg border-2 border-gray-300 cursor-zoom-in hover:border-blue-400 transition-colors"
                             onClick={(e) => {
@@ -344,8 +344,8 @@ export default function ReviewQueuePage() {
                             onError={(e) => {
                               // Fallback to original if normalized doesn't exist
                               const target = e.currentTarget;
-                              if (!target.src.includes('type=original')) {
-                                target.src = `${apiUrl}/api/v1/receipts/${item.details.receipt_id}/file?type=original`;
+                              if (!target.src.includes('file_type=original')) {
+                                target.src = `${apiUrl}/api/v1/receipts/${item.details.receipt_id}/file?file_type=original`;
                               } else {
                                 target.style.display = 'none';
                               }

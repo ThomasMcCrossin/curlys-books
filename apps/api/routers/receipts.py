@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import List, Optional
 
 import structlog
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -191,7 +191,7 @@ async def reject_receipt(
 @router.get("/{receipt_id}/file")
 async def get_receipt_file(
     receipt_id: str,
-    file_type: str = "original",  # original, thumbnail, normalized
+    file_type: str = Query("original", description="File type: original, thumbnail, or normalized"),
     db: AsyncSession = Depends(get_db_session),
 ):
     """
@@ -223,6 +223,11 @@ async def get_receipt_file(
             detail=f"Receipt {receipt_id} not found",
         )
 
+    logger.info("receipt_file_requested",
+               receipt_id=receipt_id,
+               file_type=file_type,
+               entity=receipt['entity'])
+
     # Determine file path based on file_type
     receipt_dir = Path(f"/srv/curlys-books/objects/{receipt['entity']}/{receipt_id}")
 
@@ -246,6 +251,10 @@ async def get_receipt_file(
         file_path = receipt_dir / "thumbnail.jpg"
     elif file_type == "normalized":
         file_path = receipt_dir / "normalized.jpg"
+        logger.info("looking_for_normalized",
+                   receipt_id=receipt_id,
+                   path=str(file_path),
+                   exists=file_path.exists())
     else:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -256,7 +265,7 @@ async def get_receipt_file(
     if not file_path.exists():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"File not found: {file_type}",
+            detail=f"File not found: {file_type} at {file_path}",
         )
 
     # Determine media type based on extension
