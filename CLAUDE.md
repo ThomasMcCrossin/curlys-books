@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Curly's Books is a multi-entity accounting system for 14587430 Canada Inc. (Curly's Canteen - corp) and Sole Prop (Curly's Sports & Supplements - soleprop). It replaces Wave with accountant-grade books, HST returns, T2/GIFI, and T2125 exports.
 
-**Key Features:** Receipt capture (PWA camera, email-in, Drive sync), hybrid OCR (Tesseract + GPT-4V fallback), vendor-specific parsing templates, bank reconciliation, PAD/autopay matching, Shopify integration, and year-end exports.
+**Key Features:** Receipt capture (PWA camera, email-in, Drive sync), AWS Textract OCR (Tesseract only for PDFs ≥96%), vendor-specific parsing templates, bank reconciliation, PAD/autopay matching, Shopify integration, and year-end exports.
 
 **Phase 1 Status (Week 1-2):** ✅ Complete - Parser infrastructure, vendor dispatching, entity-aware repositories, SKU caching. See `docs/PHASE1_PROGRESS.md` for details.
 
@@ -74,6 +74,39 @@ docker compose exec api python packages/parsers/statement_parser.py statements/t
 
 ## Architecture
 
+### Container Responsibilities
+
+**CRITICAL:** OCR and parsing tools are **only** in the `worker` container.
+
+- **API Container (`api`):** FastAPI web server, endpoints, request validation
+  - **Has:** Python, FastAPI, SQLAlchemy, Pydantic
+  - **Does NOT have:** Tesseract, pdf2image, OCR libraries
+  - **Cannot run:** OCR scripts, parser tests that need image processing
+
+- **Worker Container (`worker`):** Celery background tasks, OCR processing
+  - **Has:** Python, Tesseract, Pillow, pdf2image, pytesseract, all parser code
+  - **Runs:** `services/worker/tasks/ocr_receipt.py`
+  - **Use for:** Testing parsers, running OCR scripts, processing receipts
+
+**Common Mistakes:**
+```bash
+# ❌ WRONG - API container doesn't have Tesseract
+docker compose exec api python scripts/test_parser.py
+
+# ✅ CORRECT - Worker container has OCR tools
+docker compose exec worker python scripts/test_parser.py
+
+# ❌ WRONG - docker compose restart doesn't reload env vars from docker-compose.yml changes
+docker compose restart worker
+
+# ✅ CORRECT - Must stop and start to reload docker-compose.yml environment changes
+docker compose stop worker && docker compose up -d worker
+```
+
+**When to use each:**
+- `docker compose restart` - Restart container without reloading config (for code changes only)
+- `docker compose stop && up -d` - Full reload (for docker-compose.yml or .env changes)
+
 ### Multi-Entity Separation
 
 The system manages two separate legal entities using **separate PostgreSQL schemas**:
@@ -116,7 +149,10 @@ Verify with: `make check-imports`
 
 1. **Upload** → `apps/api/routers/receipts.py` saves to `/srv/curlys-books/objects/{entity}/{receipt_id}/original.{ext}`
 2. **Queue OCR** → Celery task `services/worker/tasks/ocr_receipt.py`
-3. **OCR** → Tesseract first (confidence threshold 90%), GPT-4V fallback if low confidence
+3. **OCR Strategy** → Quality data is critical to reduce manual review:
+   - **Images** (jpg, png, heic, tiff): AWS Textract ONLY (95%+ confidence guaranteed)
+   - **PDFs**: Direct text extraction → Tesseract (≥96% confidence) → Textract fallback
+   - **Why:** Bad OCR creates more work than it saves (review time, wasted AI calls)
 4. **Vendor Parsing** → `packages/parsers/vendor_dispatcher.py` routes to vendor-specific template
 5. **Normalization** → Output as `ReceiptNormalized` schema (packages/common/schemas/receipt_normalized.py)
 6. **Classification** → Maps SKUs/items to GL accounts, determines tax treatment
@@ -136,12 +172,64 @@ Verify with: `make check-imports`
 4. PAD/Autopay → Separate workflow via `packages/matching/pad_matcher.py` (Net 7, Net 14, 15th next month)
 5. Mark receipt as `matched`, update `matched_bank_line_id`
 
+### AI Categorization System
+
+**Two-stage categorization** (Phase 1.5 - Complete):
+1. **Stage 1 (AI Recognition)**: Claude 3.7 Sonnet expands vendor abbreviations and classifies products into 40+ categories
+2. **Stage 2 (Rule-based Mapping)**: Deterministic mapping from categories to GL accounts
+
+**Key Features:**
+- Smart caching via `shared.product_mappings` table (vendor+SKU → category)
+- First time: ~$0.004 per item AI call
+- Cached: FREE (instant lookup)
+- Expected after 6 months: 95%+ cache hit rate, <$1/month AI costs
+- Equipment capitalization logic (≥$2500 → Fixed Asset 1500, <$2500 → Expense 6300)
+
+**Files:**
+- `packages/domain/categorization/categorization_service.py` - Main orchestrator
+- `packages/domain/categorization/item_recognizer.py` - AI recognition (Stage 1)
+- `packages/domain/categorization/account_mapper.py` - Rule-based mapping (Stage 2)
+- `packages/domain/categorization/schemas.py` - Pydantic data models
+
+**Testing:**
+- `scripts/test_categorization.py` - Test with dummy data
+- `scripts/test_gfs_categorization.py` - Test with real GFS receipt
+
+### Chart of Accounts Management
+
+**Location:** `infra/db/seeds/chart_of_accounts.csv` (seed data) AND `packages/domain/categorization/account_mapper.py` (AI mapping)
+
+**IMPORTANT:** Both files must be kept in sync during development/testing phase!
+
+**When adding new accounts:**
+1. Add account to `chart_of_accounts.csv` with account code, name, parent, GIFI, T2125 line
+2. Add category to `account_mapper.py` ProductCategory enum
+3. Add mapping to `account_mapper.py` CATEGORY_MAP dictionary
+4. Add account name to `account_mapper.py` ACCOUNT_NAMES dictionary
+5. Update AI prompt in `item_recognizer.py` with new category description
+
+**Minimizing "Other" Categories:**
+During testing/development, when processing real receipts, if items land in generic "other" categories (5099, 5019, 5029, 5039, 5209), evaluate:
+- Is this item commonly purchased?
+- Is it a significant expense?
+- Would tracking it separately provide useful analytics?
+
+If yes, create a dedicated account (e.g., cooking oil was moved from food_other to its own account 5009).
+
+**Current granular accounts:**
+- Food: 5001-5009 (hot dogs, sandwiches, pizza, frozen, bakery, dairy, meat/deli, produce, cooking oil/fats)
+- Beverage: 5011-5019 (soda, water, energy, sports, juice, coffee/tea, milk, alcohol, other)
+- Supplements: 5021-5029 (protein, vitamins, pre-workout, recovery, sports nutrition, other)
+- Retail: 5031-5039 (snacks, candy, health products, accessories, apparel, other)
+- Packaging/Supplies: 5201-5209 (containers, bags, utensils, cleaning, paper, kitchen, other)
+
 ### Schemas and Validation
 
 **Core schemas** (Pydantic v2):
 - `ReceiptNormalized` - Canonical receipt format after OCR/parsing (packages/common/schemas/receipt_normalized.py)
-- `PostingDecision` - GL account mappings and tax treatment (TODO: not yet implemented)
-- `JournalEntry` - Double-entry journal entry (TODO: not yet implemented)
+- `CategorizedLineItem` - Result of two-stage categorization with account code
+- `RecognizedItem` - Stage 1 AI recognition result
+- `AccountMapping` - Stage 2 rule-based mapping result
 
 **Validation:**
 - Line items must sum to subtotal (±$0.02 tolerance)
@@ -261,11 +349,40 @@ Check both before saving. Perceptual hash allows detection of rescanned/rephotog
 
 ### Vendor-Specific Parsing
 
-Located in `packages/parsers/vendor_dispatcher.py` (TODO: not yet implemented). Uses `parsing_quirks` JSONB field in `vendors` table to store vendor-specific rules:
-- Line item regex patterns
-- SKU extraction logic
-- Date format variations
-- Multi-page receipt handling
+**Location:** `packages/parsers/vendor_dispatcher.py`
+
+The `VendorDispatcher` class auto-detects vendor format and routes to appropriate parser. Parsers are tried in order until one matches.
+
+**Correct API Usage:**
+```python
+from packages.parsers.vendor_dispatcher import parse_receipt
+from packages.common.schemas.receipt_normalized import EntityType
+
+# ✅ CORRECT - Convenience function (uses singleton dispatcher)
+receipt = parse_receipt(ocr_text, entity=EntityType.CORP)
+
+# ✅ CORRECT - Explicit dispatcher instance
+from packages.parsers.vendor_dispatcher import VendorDispatcher
+dispatcher = VendorDispatcher()
+receipt = dispatcher.dispatch(ocr_text, entity=EntityType.CORP)
+
+# ❌ WRONG - dispatcher doesn't have .parse() method
+dispatcher.parse(ocr_text, entity)  # AttributeError!
+```
+
+**Adding New Parsers:**
+1. Create parser in `packages/parsers/vendors/{vendor}_parser.py`
+2. Implement `detect_format(text: str) -> bool` and `parse(text: str, entity: EntityType) -> ReceiptNormalized`
+3. Import in `vendor_dispatcher.py`
+4. Add to `self.parsers` list (order matters - specific before generic)
+5. Test with real receipts to avoid false positives
+
+**Parser Detection Best Practices:**
+- Use vendor-specific markers (company name, address, phone)
+- Avoid product code matching alone (products sold at many retailers)
+- Test against receipts from other vendors to catch false positives
+
+**Current Parsers:** GFS, Costco, Grosnor, Superstore, Pepsi, Pharmasave, Walmart, Generic (fallback)
 
 ### Decimal Precision
 

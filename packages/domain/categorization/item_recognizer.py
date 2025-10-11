@@ -29,6 +29,7 @@ from packages.domain.categorization.schemas import (
     CategorizationSource,
 )
 from packages.domain.categorization.account_mapper import ProductCategory
+from packages.domain.categorization.product_lookup import product_lookup
 
 logger = structlog.get_logger()
 
@@ -55,7 +56,7 @@ class ItemRecognizer:
 
         self.client = anthropic.AsyncAnthropic(api_key=self.api_key) if self.api_key else None
 
-        # Cost per token (Claude 3.5 Sonnet pricing as of 2025)
+        # Cost per token (Claude Sonnet 4.5 pricing as of 2025)
         self.input_cost_per_1k = Decimal("0.003")   # $3 per 1M input tokens
         self.output_cost_per_1k = Decimal("0.015")  # $15 per 1M output tokens
 
@@ -121,6 +122,25 @@ class ItemRecognizer:
                 ai_cost_usd=None
             )
 
+        # Step 2.5: Try to look up product on vendor website (if SKU available)
+        product_info = None
+        if sku:
+            product_info = await product_lookup.lookup_product(
+                vendor=vendor,
+                sku=sku,
+                raw_description=raw_description
+            )
+
+            if product_info:
+                # Add product info to context
+                if context is None:
+                    context = {}
+                context["web_lookup"] = product_info
+                logger.info("web_lookup_found",
+                           vendor=vendor,
+                           sku=sku,
+                           product_name=product_info.get("product_name"))
+
         # Build AI prompt
         prompt = self._build_recognition_prompt(
             vendor=vendor,
@@ -131,8 +151,8 @@ class ItemRecognizer:
         # Call Claude API
         try:
             response = await self.client.messages.create(
-                model="claude-3-7-sonnet-20250219",  # Latest Sonnet 3.7 (cost-effective, fast)
-                max_tokens=500,
+                model="claude-sonnet-4-5",  # Claude Sonnet 4.5 (better reasoning for ambiguous items)
+                max_tokens=1024,
                 temperature=0.0,  # Deterministic for consistency
                 messages=[
                     {
@@ -219,14 +239,40 @@ VENDOR: {vendor}
 RAW DESCRIPTION: {raw_description}
 """
 
-        if context:
-            prompt += f"\nADDITIONAL CONTEXT: {context}\n"
+        # Add web lookup results if available
+        if context and "web_lookup" in context:
+            web_info = context["web_lookup"]
+            prompt += f"\nWEB LOOKUP RESULTS (from vendor website):\n"
+            if "product_name" in web_info:
+                prompt += f"  Product Name: {web_info['product_name']}\n"
+            if "brand" in web_info:
+                prompt += f"  Brand: {web_info['brand']}\n"
+            if "category_hint" in web_info:
+                prompt += f"  Category Hint: {web_info['category_hint']}\n"
+            prompt += "\nUSE THIS INFORMATION to improve categorization accuracy!\n"
+
+        if context and any(k != "web_lookup" for k in context.keys()):
+            # Add other context if present
+            other_context = {k: v for k, v in context.items() if k != "web_lookup"}
+            prompt += f"\nADDITIONAL CONTEXT: {other_context}\n"
 
         prompt += f"""
+IMPORTANT WORKFLOW NOTES:
+- Your categorization is the FIRST PASS - a human will review ambiguous items
+- If the description is vague or has multiple interpretations, provide your best guess but LOWER YOUR CONFIDENCE
+- Examples of ambiguous items: "EAST COAST" (seafood? coffee?), "PC PROT" (protein? protection plan?)
+- Users will correct misclassifications, which improves the cache over time
+- When uncertain, it's better to guess reasonably with low confidence than to mark everything as "unknown"
+
 INSTRUCTIONS:
 1. Expand abbreviations to full product name (e.g., "MTN DEW 591ML" → "Mountain Dew Citrus Soda 591mL")
 2. Identify the brand if recognizable
 3. Classify into ONE of these categories (choose most specific):
+4. Set confidence based on certainty:
+   - 0.95-0.99: Very confident (clear brand/product like "PEPSI 32 PK")
+   - 0.80-0.94: Confident but some ambiguity (clear type but generic brand)
+   - 0.60-0.79: Uncertain (vague description, multiple interpretations possible)
+   - Below 0.60: Very uncertain (use "unknown" category instead)
 
 FOOD CATEGORIES:
 - food_hotdog: Hot dogs, sausages, wieners
@@ -300,12 +346,27 @@ RESPONSE FORMAT (return ONLY this JSON, no other text):
 Examples:
 Input: "MTN DEW 591ML"
 Output: {{"normalized_description": "Mountain Dew Citrus Soda 591mL", "brand": "Mountain Dew", "product_type": "soft drink", "category": "beverage_soda", "confidence": 0.98}}
+Reasoning: Clear brand, clear product type → high confidence
 
 Input: "SCTSBRN CFF CRM"
 Output: {{"normalized_description": "Scotsburn Coffee Cream", "brand": "Scotsburn", "product_type": "cream", "category": "food_dairy", "confidence": 0.92}}
+Reasoning: Recognizable abbreviation, clear product → high confidence
 
 Input: "GATORADE COOL BLUE"
 Output: {{"normalized_description": "Gatorade Cool Blue Sports Drink", "brand": "Gatorade", "product_type": "sports drink", "category": "beverage_sports", "confidence": 0.99}}
+Reasoning: Well-known brand, clear product line → very high confidence
+
+Input: "EAST COAST"
+Output: {{"normalized_description": "East Coast Brand Product", "brand": "East Coast", "product_type": "unknown", "category": "unknown", "confidence": 0.55}}
+Reasoning: Too vague - could be seafood, coffee, or many other products → low confidence, needs user review
+
+Input: "EAST COAST COFFEE 1KG"
+Output: {{"normalized_description": "East Coast Coffee Company Medium Roast Whole Bean Coffee 1kg", "brand": "East Coast Coffee Company", "product_type": "coffee beans", "category": "food_pantry", "confidence": 0.88}}
+Reasoning: Clear product type (coffee), recognizable Canadian brand → high confidence
+
+Input: "HOT ROD 40CT"
+Output: {{"normalized_description": "Hot Rod Pepperoni Sticks 40 Count", "brand": "Hot Rod", "product_type": "meat snack", "category": "retail_snack", "confidence": 0.92}}
+Reasoning: "Hot Rod" is a brand name for meat snacks, not describing hot dogs as a product → high confidence
 
 Now classify: {raw_description}
 """

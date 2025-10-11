@@ -62,6 +62,12 @@ class Settings(BaseSettings):
     # OCR / Parsing
     tesseract_path: str = Field(default="/usr/bin/tesseract", alias="TESSERACT_PATH")
     tesseract_confidence_threshold: int = Field(default=90, alias="TESSERACT_CONFIDENCE_THRESHOLD")
+
+    # AI Categorization
+    anthropic_api_key: Optional[str] = Field(default=None, alias="ANTHROPIC_API_KEY")
+    categorization_confidence_threshold: float = Field(default=0.80, alias="CATEGORIZATION_CONFIDENCE_THRESHOLD")  # Items below this require review
+    categorization_web_lookup_enabled: bool = Field(default=False, alias="CATEGORIZATION_WEB_LOOKUP_ENABLED")  # Enable vendor website lookups
+    categorization_web_lookup_timeout: float = Field(default=5.0, alias="CATEGORIZATION_WEB_LOOKUP_TIMEOUT")  # seconds
     
     # AWS Textract (fallback when confidence < threshold)
     textract_fallback_enabled: bool = Field(default=True, alias="TEXTRACT_FALLBACK_ENABLED")
