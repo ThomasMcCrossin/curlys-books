@@ -15,7 +15,7 @@ from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 from starlette.responses import Response
 
 from apps.api.middleware.auth_cloudflare import CloudflareAccessMiddleware
-from apps.api.routers import receipts  # banking, reimbursements, reports, shopify_sync
+from apps.api.routers import receipts, review  # banking, reimbursements, reports, shopify_sync
 from packages.common.config import get_settings
 from packages.common.database import engine, sessionmanager
 
@@ -123,6 +123,7 @@ async def general_exception_handler(request: Request, exc: Exception):
 
 # Include routers
 app.include_router(receipts.router, prefix="/api/v1/receipts", tags=["Receipts"])
+app.include_router(review.router, prefix="/api/v1", tags=["Review"])
 # app.include_router(banking.router, prefix="/api/v1/banking", tags=["Banking"])
 # app.include_router(reimbursements.router, prefix="/api/v1/reimbursements", tags=["Reimbursements"])
 # app.include_router(reports.router, prefix="/api/v1/reports", tags=["Reports"])
