@@ -313,7 +313,23 @@ export default function ReviewQueuePage() {
                 key={item.id}
                 className="bg-white rounded-lg shadow p-6 hover:shadow-lg transition-shadow"
               >
-                <div className="flex items-start justify-between mb-4">
+                <div className="flex items-start justify-between mb-4 gap-6">
+                  {/* Receipt Image */}
+                  {item.details?.receipt_id && (
+                    <div className="flex-shrink-0 w-64">
+                      <img
+                        src={`${apiUrl}/api/v1/receipts/${item.details.receipt_id}/file`}
+                        alt="Receipt"
+                        className="w-full h-auto rounded-lg border border-gray-200 shadow-sm"
+                        onError={(e) => {
+                          // Hide image if it fails to load
+                          e.currentTarget.style.display = 'none';
+                        }}
+                      />
+                    </div>
+                  )}
+
+                  {/* Item Details */}
                   <div className="flex-1">
                     <div className="flex items-center gap-3 mb-2">
                       <span className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-medium">

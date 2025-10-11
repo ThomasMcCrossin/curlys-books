@@ -192,12 +192,85 @@ async def reject_receipt(
 async def get_receipt_file(
     receipt_id: str,
     file_type: str = "original",  # original, thumbnail, normalized
+    db: AsyncSession = Depends(get_db_session),
 ):
     """
     Retrieve receipt file (image or PDF)
+
+    File types:
+    - original: Original uploaded file
+    - thumbnail: Web-optimized preview (if available)
+    - normalized: Preprocessed for OCR (if available)
     """
-    # TODO: Implement file retrieval
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="File retrieval not yet implemented",
+    from fastapi.responses import FileResponse
+    import os
+
+    # Query database to get receipt info
+    from sqlalchemy import text
+
+    # Try both entity schemas
+    for schema in ["curlys_corp", "curlys_soleprop"]:
+        query = text(f"SELECT id, entity, original_file_path FROM {schema}.receipts WHERE id = :receipt_id")
+        result = await db.execute(query, {"receipt_id": receipt_id})
+        receipt = result.mappings().first()
+
+        if receipt:
+            break
+
+    if not receipt:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Receipt {receipt_id} not found",
+        )
+
+    # Determine file path based on file_type
+    receipt_dir = Path(f"/srv/curlys-books/objects/{receipt['entity']}/{receipt_id}")
+
+    if file_type == "original":
+        # Check if file exists in proper storage location
+        if receipt_dir.exists():
+            # Find original file (any extension)
+            original_files = list(receipt_dir.glob("original.*"))
+            if original_files:
+                file_path = original_files[0]
+            else:
+                # Fallback to original_file_path from database
+                file_path = Path(receipt["original_file_path"])
+        else:
+            # Fallback to original_file_path from database
+            file_path = Path(receipt["original_file_path"])
+
+    elif file_type == "thumbnail":
+        file_path = receipt_dir / "thumbnail.jpg"
+    elif file_type == "normalized":
+        file_path = receipt_dir / "normalized.jpg"
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid file_type: {file_type}",
+        )
+
+    # Check if file exists
+    if not file_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"File not found: {file_type}",
+        )
+
+    # Determine media type based on extension
+    ext = file_path.suffix.lower()
+    media_type_map = {
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".heic": "image/heic",
+        ".heif": "image/heif",
+        ".pdf": "application/pdf",
+    }
+    media_type = media_type_map.get(ext, "application/octet-stream")
+
+    return FileResponse(
+        path=str(file_path),
+        media_type=media_type,
+        filename=f"{receipt_id}_{file_type}{ext}",
     )
