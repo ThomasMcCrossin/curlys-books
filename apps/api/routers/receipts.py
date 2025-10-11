@@ -229,10 +229,12 @@ async def get_receipt_file(
     if file_type == "original":
         # Check if file exists in proper storage location
         if receipt_dir.exists():
-            # Find original file (any extension)
-            original_files = list(receipt_dir.glob("original.*"))
-            if original_files:
-                file_path = original_files[0]
+            # Prefer browser-compatible formats (JPG, PNG) over HEIC/HEIF
+            for ext in [".jpg", ".jpeg", ".png", ".heic", ".heif", ".pdf"]:
+                candidate = receipt_dir / f"original{ext}"
+                if candidate.exists():
+                    file_path = candidate
+                    break
             else:
                 # Fallback to original_file_path from database
                 file_path = Path(receipt["original_file_path"])

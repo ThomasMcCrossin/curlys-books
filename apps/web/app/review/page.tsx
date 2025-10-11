@@ -316,16 +316,31 @@ export default function ReviewQueuePage() {
                 <div className="flex items-start justify-between mb-4 gap-6">
                   {/* Receipt Image */}
                   {item.details?.receipt_id && (
-                    <div className="flex-shrink-0 w-64">
-                      <img
-                        src={`${apiUrl}/api/v1/receipts/${item.details.receipt_id}/file`}
-                        alt="Receipt"
-                        className="w-full h-auto rounded-lg border border-gray-200 shadow-sm"
-                        onError={(e) => {
-                          // Hide image if it fails to load
-                          e.currentTarget.style.display = 'none';
-                        }}
-                      />
+                    <div className="flex-shrink-0 w-80">
+                      <div className="sticky top-4">
+                        <div className="bg-blue-50 border border-blue-200 rounded-t-lg px-3 py-2">
+                          <div className="text-xs font-medium text-blue-900">
+                            Receipt #{item.details.receipt_id.substring(0, 8)}...
+                          </div>
+                          {item.details.line_number && (
+                            <div className="text-xs text-blue-700 mt-1">
+                              📍 Reviewing line {item.details.line_number} of {item.details.line_number}
+                            </div>
+                          )}
+                        </div>
+                        <img
+                          src={`${apiUrl}/api/v1/receipts/${item.details.receipt_id}/file`}
+                          alt="Receipt"
+                          className="w-full h-auto rounded-b-lg border border-gray-200 shadow-sm"
+                          onError={(e) => {
+                            // Hide image if it fails to load
+                            e.currentTarget.style.display = 'none';
+                          }}
+                        />
+                        <div className="mt-2 text-xs text-gray-500 text-center">
+                          💡 Scroll to find line item on receipt
+                        </div>
+                      </div>
                     </div>
                   )}
 
