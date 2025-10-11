@@ -2,20 +2,24 @@
 OCR receipt processing task - Full implementation
 
 Flow:
-1. Tesseract OCR (primary, fast)
-2. Textract fallback if confidence < 90%
-3. Vendor normalization (database lookup)
-4. Parser dispatch (route to vendor-specific parser)
-5. Line item extraction
+1. OCR Strategy (quality data is critical):
+   - Images (jpg, png, heic, tiff): AWS Textract ONLY (95%+ confidence)
+   - PDFs: Try direct text extraction → Tesseract (≥96%) → Textract fallback
+2. Vendor normalization (database lookup)
+3. Parser dispatch (route to vendor-specific parser)
+4. Line item extraction
+5. AI categorization (Phase 1.5)
 6. Store results in database
 
-Phase 1 Complete!
+Phase 1.5: AI categorization integrated!
+ARCHITECTURE CHANGE: Textract-only for images. PDFs get text extraction → Tesseract (96%+) → Textract.
 """
 import os
 import shutil
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, List
 from uuid import UUID
+from decimal import Decimal
 
 import structlog
 from celery import Task
@@ -28,6 +32,7 @@ from packages.parsers.ocr_engine import extract_text_from_receipt
 from packages.parsers.textract_fallback import extract_with_textract
 from packages.parsers.vendor_dispatcher import parse_receipt
 from packages.parsers.vendor_service import VendorRegistry
+from packages.domain.categorization.categorization_service import categorization_service
 
 logger = structlog.get_logger()
 
@@ -81,25 +86,16 @@ async def process_receipt_task(
                source=source)
 
     try:
-        # Step 1: Extract text with OCR
+        # Step 1: Extract text with OCR (strategy depends on file type)
         logger.info("ocr_step_1_extracting_text", receipt_id=receipt_id)
 
-        # Try Tesseract first (fast, free)
-        ocr_result = await extract_text_from_receipt(file_path)
+        file_ext = Path(file_path).suffix.lower()
+        is_image = file_ext in ['.jpg', '.jpeg', '.png', '.heic', '.heif', '.tiff', '.tif', '.bmp']
+        is_pdf = file_ext == '.pdf'
 
-        logger.info("ocr_tesseract_complete",
-                   receipt_id=receipt_id,
-                   confidence=ocr_result.confidence,
-                   method=ocr_result.method,
-                   chars=len(ocr_result.text),
-                   pages=ocr_result.page_count)
-
-        # Fallback to Textract if confidence too low
-        if ocr_result.confidence < TESSERACT_CONFIDENCE_THRESHOLD and TEXTRACT_FALLBACK_ENABLED:
-            logger.warning("ocr_low_confidence_fallback_to_textract",
-                          receipt_id=receipt_id,
-                          tesseract_confidence=ocr_result.confidence,
-                          threshold=TESSERACT_CONFIDENCE_THRESHOLD)
+        if is_image:
+            # Images: Use Textract ONLY (no Tesseract for production)
+            logger.info("ocr_using_textract_for_image", receipt_id=receipt_id, file_type=file_ext)
 
             try:
                 ocr_result = await extract_with_textract(file_path)
@@ -107,16 +103,68 @@ async def process_receipt_task(
                 logger.info("ocr_textract_complete",
                            receipt_id=receipt_id,
                            confidence=ocr_result.confidence,
-                           chars=len(ocr_result.text))
+                           chars=len(ocr_result.text),
+                           method=ocr_result.method)
 
             except Exception as e:
-                logger.error("textract_fallback_failed",
+                logger.error("textract_failed_for_image",
                             receipt_id=receipt_id,
                             error=str(e),
                             exc_info=True)
-                # Continue with Tesseract result even if Textract fails
-                logger.info("using_tesseract_despite_low_confidence",
-                           receipt_id=receipt_id)
+                raise  # Don't continue with bad OCR - fail fast
+
+        elif is_pdf:
+            # PDFs: Try text extraction → Tesseract (96%+) → Textract
+            logger.info("ocr_pdf_strategy", receipt_id=receipt_id)
+
+            # First try direct text extraction (free, 100% accurate for text-based PDFs)
+            ocr_result = await extract_text_from_receipt(file_path)
+
+            if ocr_result.method == "pdf_text_extraction":
+                # Got embedded text - perfect!
+                logger.info("ocr_pdf_text_extraction_success",
+                           receipt_id=receipt_id,
+                           confidence=ocr_result.confidence,
+                           chars=len(ocr_result.text))
+            else:
+                # PDF required OCR (scanned/image-based PDF)
+                logger.info("ocr_pdf_required_tesseract",
+                           receipt_id=receipt_id,
+                           confidence=ocr_result.confidence,
+                           chars=len(ocr_result.text),
+                           pages=ocr_result.page_count)
+
+                # If Tesseract confidence < 96%, use Textract
+                if ocr_result.confidence < 0.96 and TEXTRACT_FALLBACK_ENABLED:
+                    logger.warning("ocr_pdf_low_confidence_using_textract",
+                                  receipt_id=receipt_id,
+                                  tesseract_confidence=ocr_result.confidence,
+                                  threshold=0.96)
+
+                    try:
+                        ocr_result = await extract_with_textract(file_path)
+
+                        logger.info("ocr_textract_complete",
+                                   receipt_id=receipt_id,
+                                   confidence=ocr_result.confidence,
+                                   chars=len(ocr_result.text))
+
+                    except Exception as e:
+                        logger.error("textract_fallback_failed",
+                                    receipt_id=receipt_id,
+                                    error=str(e),
+                                    exc_info=True)
+                        # Continue with Tesseract result if Textract fails
+                        logger.warning("using_tesseract_despite_low_confidence",
+                                      receipt_id=receipt_id,
+                                      confidence=ocr_result.confidence)
+        else:
+            # Unknown file type - try Tesseract as last resort
+            logger.warning("ocr_unknown_file_type",
+                          receipt_id=receipt_id,
+                          file_type=file_ext,
+                          message="Attempting Tesseract OCR")
+            ocr_result = await extract_text_from_receipt(file_path)
 
         # Step 2: Normalize vendor name and get entity assignment
         logger.info("ocr_step_2_normalizing_vendor", receipt_id=receipt_id)
@@ -186,6 +234,84 @@ async def process_receipt_task(
                 "requires_review": True,
             }
 
+        # Step 3.5: Categorize line items with AI (Phase 1.5)
+        logger.info("ocr_step_3_5_categorizing_items",
+                   receipt_id=receipt_id,
+                   vendor=parsed_receipt.vendor_guess,
+                   line_count=len(parsed_receipt.lines))
+
+        categorized_lines = []
+        total_ai_cost = Decimal("0")
+
+        async for session in get_db_session():
+            try:
+                for line in parsed_receipt.lines:
+                    # Skip non-item lines (deposits, fees, etc.)
+                    if not line.sku and not line.description:
+                        categorized_lines.append({
+                            "line": line,
+                            "categorization": None
+                        })
+                        continue
+
+                    try:
+                        categorization_result = await categorization_service.categorize_line_item(
+                            vendor=vendor_canonical or parsed_receipt.vendor_guess or "Unknown",
+                            sku=line.sku,
+                            raw_description=line.description,
+                            line_total=line.line_total or Decimal("0"),
+                            db=session
+                        )
+
+                        categorized_lines.append({
+                            "line": line,
+                            "categorization": categorization_result
+                        })
+
+                        if categorization_result.ai_cost_usd:
+                            total_ai_cost += categorization_result.ai_cost_usd
+
+                        logger.info("line_categorized",
+                                   receipt_id=receipt_id,
+                                   sku=line.sku,
+                                   description=line.description[:50],
+                                   category=categorization_result.product_category,
+                                   account=categorization_result.account_code,
+                                   confidence=float(categorization_result.confidence),
+                                   requires_review=categorization_result.requires_review,
+                                   source=categorization_result.source)
+
+                    except Exception as e:
+                        logger.error("line_categorization_failed",
+                                    receipt_id=receipt_id,
+                                    sku=line.sku,
+                                    description=line.description,
+                                    error=str(e),
+                                    exc_info=True)
+
+                        # Continue with uncategorized line
+                        categorized_lines.append({
+                            "line": line,
+                            "categorization": None
+                        })
+
+                logger.info("categorization_complete",
+                           receipt_id=receipt_id,
+                           lines_categorized=len([c for c in categorized_lines if c["categorization"]]),
+                           lines_failed=len([c for c in categorized_lines if not c["categorization"]]),
+                           total_ai_cost=float(total_ai_cost))
+
+                break  # Exit async generator
+
+            except Exception as e:
+                logger.error("categorization_batch_failed",
+                            receipt_id=receipt_id,
+                            error=str(e),
+                            exc_info=True)
+                # Continue without categorization
+                categorized_lines = [{"line": line, "categorization": None} for line in parsed_receipt.lines]
+                break
+
         # Step 4: Reorganize files to readable folder structure
         logger.info("ocr_step_4_reorganizing_files", receipt_id=receipt_id)
 
@@ -215,14 +341,16 @@ async def process_receipt_task(
                     ocr_result=ocr_result,
                     parsed_receipt=parsed_receipt,
                     vendor_canonical=vendor_canonical,
-                    file_path=new_file_path
+                    file_path=new_file_path,
+                    categorized_lines=categorized_lines
                 )
 
                 await session.commit()
 
                 logger.info("receipt_stored",
                            receipt_id=receipt_id,
-                           lines_stored=len(parsed_receipt.lines))
+                           lines_stored=len(parsed_receipt.lines),
+                           lines_categorized=len([c for c in categorized_lines if c["categorization"]]))
 
                 break  # Exit async generator
 
@@ -348,14 +476,15 @@ async def store_receipt_results(
     ocr_result,
     parsed_receipt,
     vendor_canonical: str,
-    file_path: str = None
+    file_path: str = None,
+    categorized_lines: List[Dict[str, Any]] = None
 ):
     """
     Store OCR and parsing results in database.
 
     Updates:
     - receipts table (status, vendor, totals, OCR metadata)
-    - receipt_line_items table (all line items)
+    - receipt_line_items table (all line items with categorization)
 
     Args:
         session: Database session
@@ -364,6 +493,8 @@ async def store_receipt_results(
         ocr_result: OCR extraction result
         parsed_receipt: Parsed receipt object
         vendor_canonical: Normalized vendor name
+        file_path: Updated file path (after reorganization)
+        categorized_lines: List of dicts with 'line' and 'categorization' keys
     """
     from sqlalchemy import text
 
@@ -407,47 +538,146 @@ async def store_receipt_results(
         update_fields
     )
 
-    # Insert line items
-    for line_num, line in enumerate(parsed_receipt.lines, start=1):
-        await session.execute(
-            text(f"""
-                INSERT INTO {schema_name}.receipt_line_items (
-                    receipt_id,
-                    line_number,
-                    sku,
-                    description,
-                    quantity,
-                    unit_price,
-                    line_total,
-                    requires_review,
-                    confidence_score,
-                    categorization_source
-                ) VALUES (
-                    :receipt_id,
-                    :line_number,
-                    :sku,
-                    :description,
-                    :quantity,
-                    :unit_price,
-                    :line_total,
-                    :requires_review,
-                    :confidence_score,
-                    :categorization_source
+    # Insert line items with categorization
+    if categorized_lines:
+        # Phase 1.5: Use categorization data
+        for line_num, categorized_line in enumerate(categorized_lines, start=1):
+            line = categorized_line["line"]
+            categorization = categorized_line.get("categorization")
+
+            if categorization:
+                # Line was successfully categorized
+                await session.execute(
+                    text(f"""
+                        INSERT INTO {schema_name}.receipt_line_items (
+                            receipt_id,
+                            line_number,
+                            sku,
+                            description,
+                            quantity,
+                            unit_price,
+                            line_total,
+                            account_code,
+                            product_category,
+                            confidence_score,
+                            categorization_source,
+                            requires_review,
+                            ai_cost
+                        ) VALUES (
+                            :receipt_id,
+                            :line_number,
+                            :sku,
+                            :description,
+                            :quantity,
+                            :unit_price,
+                            :line_total,
+                            :account_code,
+                            :product_category,
+                            :confidence_score,
+                            :categorization_source,
+                            :requires_review,
+                            :ai_cost
+                        )
+                    """),
+                    {
+                        "receipt_id": receipt_id,
+                        "line_number": line_num,
+                        "sku": line.sku,
+                        "description": line.description,
+                        "quantity": line.quantity,
+                        "unit_price": line.unit_price,
+                        "line_total": line.line_total,
+                        "account_code": categorization.account_code,
+                        "product_category": categorization.product_category,
+                        "confidence_score": categorization.confidence,
+                        "categorization_source": categorization.source,
+                        "requires_review": categorization.requires_review,
+                        "ai_cost": categorization.ai_cost_usd,
+                    }
                 )
-            """),
-            {
-                "receipt_id": receipt_id,
-                "line_number": line_num,
-                "sku": line.sku,
-                "description": line.description,
-                "quantity": line.quantity,
-                "unit_price": line.unit_price,
-                "line_total": line.line_total,
-                "requires_review": True,  # Phase 1: All items need review (no AI categorization yet)
-                "confidence_score": ocr_result.confidence,
-                "categorization_source": "pending",  # Will be set when AI categorization is implemented
-            }
-        )
+            else:
+                # Line categorization failed, store without categorization
+                await session.execute(
+                    text(f"""
+                        INSERT INTO {schema_name}.receipt_line_items (
+                            receipt_id,
+                            line_number,
+                            sku,
+                            description,
+                            quantity,
+                            unit_price,
+                            line_total,
+                            requires_review,
+                            confidence_score,
+                            categorization_source
+                        ) VALUES (
+                            :receipt_id,
+                            :line_number,
+                            :sku,
+                            :description,
+                            :quantity,
+                            :unit_price,
+                            :line_total,
+                            :requires_review,
+                            :confidence_score,
+                            :categorization_source
+                        )
+                    """),
+                    {
+                        "receipt_id": receipt_id,
+                        "line_number": line_num,
+                        "sku": line.sku,
+                        "description": line.description,
+                        "quantity": line.quantity,
+                        "unit_price": line.unit_price,
+                        "line_total": line.line_total,
+                        "requires_review": True,  # Needs review since categorization failed
+                        "confidence_score": None,
+                        "categorization_source": "failed",
+                    }
+                )
+    else:
+        # Fallback: No categorization data (should not happen in Phase 1.5+)
+        for line_num, line in enumerate(parsed_receipt.lines, start=1):
+            await session.execute(
+                text(f"""
+                    INSERT INTO {schema_name}.receipt_line_items (
+                        receipt_id,
+                        line_number,
+                        sku,
+                        description,
+                        quantity,
+                        unit_price,
+                        line_total,
+                        requires_review,
+                        confidence_score,
+                        categorization_source
+                    ) VALUES (
+                        :receipt_id,
+                        :line_number,
+                        :sku,
+                        :description,
+                        :quantity,
+                        :unit_price,
+                        :line_total,
+                        :requires_review,
+                        :confidence_score,
+                        :categorization_source
+                    )
+                """),
+                {
+                    "receipt_id": receipt_id,
+                    "line_number": line_num,
+                    "sku": line.sku,
+                    "description": line.description,
+                    "quantity": line.quantity,
+                    "unit_price": line.unit_price,
+                    "line_total": line.line_total,
+                    "requires_review": True,  # All items need review without categorization
+                    "confidence_score": None,
+                    "categorization_source": "pending",
+                }
+            )
 
     logger.info("receipt_results_stored",
                receipt_id=receipt_id,
