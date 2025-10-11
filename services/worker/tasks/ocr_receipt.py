@@ -25,6 +25,7 @@ from decimal import Decimal
 import structlog
 from celery import Task
 from sqlalchemy.ext.asyncio import AsyncSession
+from PIL import Image
 
 from services.worker.celery_app import app
 from packages.common.database import get_db_session
@@ -76,6 +77,56 @@ def match_line_to_bounding_box(line_description: str, bounding_boxes: List[Dict[
 
     # Only return if we found at least 2 matching words
     return best_match if best_score >= 2 else None
+
+
+def create_normalized_image(original_path: str, max_width: int = 800) -> None:
+    """
+    Create a normalized (resized) version of the receipt image.
+
+    Saves to same directory as `normalized.jpg`.
+    Only processes image files (not PDFs).
+
+    Args:
+        original_path: Path to original receipt file
+        max_width: Maximum width in pixels (default 800)
+    """
+    original_path = Path(original_path)
+
+    # Only process image files
+    if original_path.suffix.lower() in ['.jpg', '.jpeg', '.png', '.heic', '.heif', '.tiff', '.tif', '.bmp']:
+        try:
+            # Load image (with HEIC support via pillow_heif)
+            from pillow_heif import register_heif_opener
+            register_heif_opener()
+
+            img = Image.open(original_path)
+
+            # Convert to RGB if needed
+            if img.mode not in ('RGB', 'L'):
+                img = img.convert('RGB')
+
+            # Resize if needed
+            if img.width > max_width:
+                ratio = max_width / img.width
+                new_height = int(img.height * ratio)
+                img = img.resize((max_width, new_height), Image.Resampling.LANCZOS)
+
+                logger.info("image_normalized",
+                           original_size=f"{img.width}x{img.height}",
+                           normalized_size=f"{max_width}x{new_height}")
+
+            # Save as normalized.jpg in same directory
+            normalized_path = original_path.parent / "normalized.jpg"
+            img.save(normalized_path, "JPEG", quality=90, optimize=True)
+
+            logger.info("normalized_image_created",
+                       path=str(normalized_path),
+                       size_bytes=normalized_path.stat().st_size)
+        except Exception as e:
+            logger.error("failed_to_create_normalized_image",
+                        path=str(original_path),
+                        error=str(e),
+                        exc_info=True)
 
 # Configuration from environment
 TESSERACT_CONFIDENCE_THRESHOLD = float(os.getenv('TESSERACT_CONFIDENCE_THRESHOLD', '0.90'))
@@ -203,6 +254,10 @@ async def process_receipt_task(
                           file_type=file_ext,
                           message="Attempting Tesseract OCR")
             ocr_result = await extract_text_from_receipt(file_path)
+
+        # Step 1.5: Create normalized image (800px width) for UI display
+        logger.info("ocr_step_1_5_creating_normalized_image", receipt_id=receipt_id)
+        create_normalized_image(file_path, max_width=800)
 
         # Step 2: Normalize vendor name and get entity assignment
         logger.info("ocr_step_2_normalizing_vendor", receipt_id=receipt_id)
