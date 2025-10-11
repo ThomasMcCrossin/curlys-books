@@ -67,11 +67,20 @@ class PepsiParser(BaseReceiptParser):
                 return True
 
         # Format 2: Email summary indicators
-        # Look for multiple Pepsi product codes (69000xxxxx pattern)
-        pepsi_product_codes = re.findall(r'69000\d{6}', text)
-        if len(pepsi_product_codes) >= 3:  # Multiple Pepsi products
-            logger.info("pepsi_format_detected", pattern="pepsi_product_codes", format="email_summary", count=len(pepsi_product_codes))
-            return True
+        # Require BOTH company indicators AND multiple Pepsi UPCs
+        # (UPC 69000 prefix alone isn't enough - those products are sold at retail stores)
+        has_company_indicator = any([
+            'PEPSICO' in text_upper,
+            'PEPSI' in text_upper and 'INVOICE' in text_upper,
+            'ROUTE #' in text_upper,
+            'BEVERAGES BREUVAGES' in text_upper,
+        ])
+
+        if has_company_indicator:
+            pepsi_product_codes = re.findall(r'69000\d{6}', text)
+            if len(pepsi_product_codes) >= 3:  # Multiple Pepsi products
+                logger.info("pepsi_format_detected", pattern="pepsi_product_codes_with_company", format="email_summary", count=len(pepsi_product_codes))
+                return True
 
         return False
 
