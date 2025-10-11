@@ -316,29 +316,53 @@ export default function ReviewQueuePage() {
                 <div className="flex items-start justify-between mb-4 gap-6">
                   {/* Receipt Image */}
                   {item.details?.receipt_id && (
-                    <div className="flex-shrink-0 w-80">
+                    <div className="flex-shrink-0 w-96">
                       <div className="sticky top-4">
                         <div className="bg-blue-50 border border-blue-200 rounded-t-lg px-3 py-2">
                           <div className="text-xs font-medium text-blue-900">
                             Receipt #{item.details.receipt_id.substring(0, 8)}...
                           </div>
                           {item.details.line_number && (
-                            <div className="text-xs text-blue-700 mt-1">
-                              📍 Reviewing line {item.details.line_number} of {item.details.line_number}
+                            <div className="text-xs text-blue-700 mt-1 flex items-center gap-2">
+                              <span className="inline-block w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
+                              Line {item.details.line_number}
+                              {item.details.description && (
+                                <span className="text-gray-600">- Look for: "{item.details.description.substring(0, 30)}..."</span>
+                              )}
                             </div>
                           )}
                         </div>
-                        <img
-                          src={`${apiUrl}/api/v1/receipts/${item.details.receipt_id}/file`}
-                          alt="Receipt"
-                          className="w-full h-auto rounded-b-lg border border-gray-200 shadow-sm"
-                          onError={(e) => {
-                            // Hide image if it fails to load
-                            e.currentTarget.style.display = 'none';
-                          }}
-                        />
-                        <div className="mt-2 text-xs text-gray-500 text-center">
-                          💡 Scroll to find line item on receipt
+                        <div className="relative bg-gray-100">
+                          <img
+                            src={`${apiUrl}/api/v1/receipts/${item.details.receipt_id}/file?type=normalized`}
+                            alt="Receipt"
+                            className="w-full h-auto rounded-b-lg border-2 border-gray-300 cursor-zoom-in hover:border-blue-400 transition-colors"
+                            onClick={(e) => {
+                              // Open in new tab for full size view
+                              window.open(`${apiUrl}/api/v1/receipts/${item.details.receipt_id}/file`, '_blank');
+                            }}
+                            onError={(e) => {
+                              // Fallback to original if normalized doesn't exist
+                              const target = e.currentTarget;
+                              if (!target.src.includes('type=original')) {
+                                target.src = `${apiUrl}/api/v1/receipts/${item.details.receipt_id}/file?type=original`;
+                              } else {
+                                target.style.display = 'none';
+                              }
+                            }}
+                          />
+                          {/* Visual indicator for line position */}
+                          {item.details.line_number && (
+                            <div className="absolute bottom-4 left-0 right-0 flex justify-center pointer-events-none">
+                              <div className="bg-red-500 text-white px-3 py-1 rounded-full text-xs font-bold shadow-lg animate-bounce">
+                                ⬇ Line {item.details.line_number} Near Bottom ⬇
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                        <div className="mt-2 text-xs text-gray-600 text-center space-y-1">
+                          <div>🔍 Click image to view full size</div>
+                          <div className="text-blue-600">💡 Look near the bottom of receipt for this line</div>
                         </div>
                       </div>
                     </div>
