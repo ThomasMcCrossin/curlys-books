@@ -351,8 +351,24 @@ export default function ReviewQueuePage() {
                               }
                             }}
                           />
-                          {/* Visual indicator for line position */}
-                          {item.details.line_number && (
+                          {/* Bounding box highlight from Textract */}
+                          {item.details.bounding_box && (
+                            <div
+                              className="absolute border-4 border-red-500 bg-red-500 bg-opacity-20 pointer-events-none animate-pulse"
+                              style={{
+                                left: `${item.details.bounding_box.left * 100}%`,
+                                top: `${item.details.bounding_box.top * 100}%`,
+                                width: `${item.details.bounding_box.width * 100}%`,
+                                height: `${item.details.bounding_box.height * 100}%`,
+                              }}
+                            >
+                              <div className="absolute -top-6 left-0 bg-red-500 text-white px-2 py-1 rounded text-xs font-bold">
+                                Problem Line
+                              </div>
+                            </div>
+                          )}
+                          {/* Fallback visual indicator if no bounding box */}
+                          {!item.details.bounding_box && item.details.line_number && (
                             <div className="absolute bottom-4 left-0 right-0 flex justify-center pointer-events-none">
                               <div className="bg-red-500 text-white px-3 py-1 rounded-full text-xs font-bold shadow-lg animate-bounce">
                                 ⬇ Line {item.details.line_number} Near Bottom ⬇

@@ -12,10 +12,10 @@ Why Textract-first for images:
 """
 import os
 import io
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Dict, Any
 
 import boto3
 import pypdf
@@ -38,6 +38,7 @@ class OCRResult:
     confidence: float  # 0.0 to 1.0
     page_count: int
     method: str  # textract, tesseract, pdf_text_extraction
+    bounding_boxes: List[Dict[str, Any]] = field(default_factory=list)  # LINE blocks with geometry from Textract
 
     def __post_init__(self):
         """Ensure confidence is in valid range"""
@@ -159,9 +160,10 @@ class OCREngine:
                 Document={'Bytes': image_bytes}
             )
 
-            # Extract text and confidence from Textract response
+            # Extract text, confidence, and bounding boxes from Textract response
             text_blocks = []
             confidences = []
+            bounding_boxes = []
 
             for block in response['Blocks']:
                 if block['BlockType'] == 'LINE':
@@ -169,19 +171,33 @@ class OCREngine:
                     if 'Confidence' in block:
                         confidences.append(block['Confidence'] / 100)  # Convert to 0-1
 
+                    # Capture bounding box (normalized 0-1 coordinates)
+                    if 'Geometry' in block:
+                        bbox = block['Geometry']['BoundingBox']
+                        bounding_boxes.append({
+                            'text': block['Text'],
+                            'confidence': block.get('Confidence', 0) / 100,
+                            'left': bbox['Left'],
+                            'top': bbox['Top'],
+                            'width': bbox['Width'],
+                            'height': bbox['Height']
+                        })
+
             text = '\n'.join(text_blocks)
             avg_confidence = sum(confidences) / len(confidences) if confidences else 0.95
 
             logger.info("textract_complete",
                        chars=len(text),
                        lines=len(text_blocks),
-                       confidence=avg_confidence)
+                       confidence=avg_confidence,
+                       bounding_boxes=len(bounding_boxes))
 
             return OCRResult(
                 text=text,
                 confidence=avg_confidence,
                 page_count=1,
-                method="textract"
+                method="textract",
+                bounding_boxes=bounding_boxes
             )
 
         except Exception as e:
@@ -335,9 +351,10 @@ class OCREngine:
                 Document={'Bytes': image_bytes}
             )
 
-            # Extract text
+            # Extract text and bounding boxes
             text_blocks = []
             confidences = []
+            bounding_boxes = []
 
             for block in response['Blocks']:
                 if block['BlockType'] == 'LINE':
@@ -345,18 +362,32 @@ class OCREngine:
                     if 'Confidence' in block:
                         confidences.append(block['Confidence'] / 100)
 
+                    # Capture bounding box
+                    if 'Geometry' in block:
+                        bbox = block['Geometry']['BoundingBox']
+                        bounding_boxes.append({
+                            'text': block['Text'],
+                            'confidence': block.get('Confidence', 0) / 100,
+                            'left': bbox['Left'],
+                            'top': bbox['Top'],
+                            'width': bbox['Width'],
+                            'height': bbox['Height']
+                        })
+
             text = '\n'.join(text_blocks)
             avg_confidence = sum(confidences) / len(confidences) if confidences else 0.95
 
             logger.info("textract_complete",
                        chars=len(text),
-                       confidence=avg_confidence)
+                       confidence=avg_confidence,
+                       bounding_boxes=len(bounding_boxes))
 
             return OCRResult(
                 text=text,
                 confidence=avg_confidence,
                 page_count=1,  # TODO: Multi-page PDF support
-                method="textract_fallback"
+                method="textract_fallback",
+                bounding_boxes=bounding_boxes
             )
 
         except Exception as e:

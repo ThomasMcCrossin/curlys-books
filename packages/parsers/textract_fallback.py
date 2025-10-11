@@ -111,14 +111,27 @@ class TextractFallback:
                 Document={'Bytes': file_bytes}
             )
 
-            # Extract text blocks
+            # Extract text blocks and bounding boxes
             text_blocks = []
             confidences = []
+            bounding_boxes = []
 
             for block in response.get('Blocks', []):
                 if block['BlockType'] == 'LINE':
                     text_blocks.append(block['Text'])
                     confidences.append(block.get('Confidence', 0))
+
+                    # Capture bounding box (normalized 0-1 coordinates)
+                    if 'Geometry' in block:
+                        bbox = block['Geometry']['BoundingBox']
+                        bounding_boxes.append({
+                            'text': block['Text'],
+                            'confidence': block.get('Confidence', 0) / 100,
+                            'left': bbox['Left'],
+                            'top': bbox['Top'],
+                            'width': bbox['Width'],
+                            'height': bbox['Height']
+                        })
 
             # Combine text
             combined_text = '\n'.join(text_blocks)
@@ -135,13 +148,15 @@ class TextractFallback:
                        blocks=len(text_blocks),
                        chars=len(combined_text),
                        confidence=avg_confidence,
-                       pages=page_count)
+                       pages=page_count,
+                       bounding_boxes=len(bounding_boxes))
 
             return OCRResult(
                 text=combined_text,
                 confidence=avg_confidence,
                 page_count=page_count,
-                method="textract"
+                method="textract",
+                bounding_boxes=bounding_boxes
             )
 
         except Exception as e:

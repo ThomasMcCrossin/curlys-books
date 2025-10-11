@@ -16,8 +16,9 @@ ARCHITECTURE CHANGE: Textract-only for images. PDFs get text extraction → Tess
 """
 import os
 import shutil
+import json
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from uuid import UUID
 from decimal import Decimal
 
@@ -38,6 +39,43 @@ logger = structlog.get_logger()
 
 # Storage configuration
 RECEIPT_STORAGE_ROOT = os.getenv('RECEIPT_STORAGE_PATH', '/srv/curlys-books/objects')
+
+
+def match_line_to_bounding_box(line_description: str, bounding_boxes: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """
+    Find the best matching bounding box for a line item description.
+
+    Simple matching: Find the OCR line that contains the most words from the description.
+
+    Args:
+        line_description: Item description from parsed receipt line
+        bounding_boxes: List of bounding boxes from Textract with 'text' field
+
+    Returns:
+        Best matching bounding box dict, or None if no good match
+    """
+    if not line_description or not bounding_boxes:
+        return None
+
+    # Normalize description for matching
+    desc_words = set(line_description.lower().split())
+
+    best_match = None
+    best_score = 0
+
+    for bbox in bounding_boxes:
+        bbox_text = bbox.get('text', '').lower()
+        bbox_words = set(bbox_text.split())
+
+        # Count how many words match
+        matches = len(desc_words & bbox_words)
+
+        if matches > best_score:
+            best_score = matches
+            best_match = bbox
+
+    # Only return if we found at least 2 matching words
+    return best_match if best_score >= 2 else None
 
 # Configuration from environment
 TESSERACT_CONFIDENCE_THRESHOLD = float(os.getenv('TESSERACT_CONFIDENCE_THRESHOLD', '0.90'))
@@ -546,6 +584,9 @@ async def store_receipt_results(
             categorization = categorized_line.get("categorization")
 
             if categorization:
+                # Find matching bounding box for this line
+                bbox = match_line_to_bounding_box(line.description, ocr_result.bounding_boxes)
+
                 # Line was successfully categorized
                 await session.execute(
                     text(f"""
@@ -562,7 +603,8 @@ async def store_receipt_results(
                             confidence_score,
                             categorization_source,
                             requires_review,
-                            ai_cost
+                            ai_cost,
+                            bounding_box
                         ) VALUES (
                             :receipt_id,
                             :line_number,
@@ -576,7 +618,8 @@ async def store_receipt_results(
                             :confidence_score,
                             :categorization_source,
                             :requires_review,
-                            :ai_cost
+                            :ai_cost,
+                            :bounding_box::jsonb
                         )
                     """),
                     {
@@ -593,9 +636,13 @@ async def store_receipt_results(
                         "categorization_source": categorization.source,
                         "requires_review": categorization.requires_review,
                         "ai_cost": categorization.ai_cost_usd,
+                        "bounding_box": json.dumps(bbox) if bbox else None,
                     }
                 )
             else:
+                # Find matching bounding box for this line
+                bbox = match_line_to_bounding_box(line.description, ocr_result.bounding_boxes)
+
                 # Line categorization failed, store without categorization
                 await session.execute(
                     text(f"""
@@ -609,7 +656,8 @@ async def store_receipt_results(
                             line_total,
                             requires_review,
                             confidence_score,
-                            categorization_source
+                            categorization_source,
+                            bounding_box
                         ) VALUES (
                             :receipt_id,
                             :line_number,
@@ -620,7 +668,8 @@ async def store_receipt_results(
                             :line_total,
                             :requires_review,
                             :confidence_score,
-                            :categorization_source
+                            :categorization_source,
+                            :bounding_box::jsonb
                         )
                     """),
                     {
@@ -634,11 +683,15 @@ async def store_receipt_results(
                         "requires_review": True,  # Needs review since categorization failed
                         "confidence_score": None,
                         "categorization_source": "failed",
+                        "bounding_box": json.dumps(bbox) if bbox else None,
                     }
                 )
     else:
         # Fallback: No categorization data (should not happen in Phase 1.5+)
         for line_num, line in enumerate(parsed_receipt.lines, start=1):
+            # Find matching bounding box for this line
+            bbox = match_line_to_bounding_box(line.description, ocr_result.bounding_boxes)
+
             await session.execute(
                 text(f"""
                     INSERT INTO {schema_name}.receipt_line_items (
@@ -651,7 +704,8 @@ async def store_receipt_results(
                         line_total,
                         requires_review,
                         confidence_score,
-                        categorization_source
+                        categorization_source,
+                        bounding_box
                     ) VALUES (
                         :receipt_id,
                         :line_number,
@@ -662,7 +716,8 @@ async def store_receipt_results(
                         :line_total,
                         :requires_review,
                         :confidence_score,
-                        :categorization_source
+                        :categorization_source,
+                        :bounding_box::jsonb
                     )
                 """),
                 {
@@ -676,6 +731,7 @@ async def store_receipt_results(
                     "requires_review": True,  # All items need review without categorization
                     "confidence_score": None,
                     "categorization_source": "pending",
+                    "bounding_box": json.dumps(bbox) if bbox else None,
                 }
             )
 
