@@ -80,7 +80,7 @@ async def get_review_queue(
         params["type"] = type.value
 
     if status:
-        where_clauses.append("status = :status::review_status")
+        where_clauses.append("status = :status")
         params["status"] = status.value
 
     if vendor:

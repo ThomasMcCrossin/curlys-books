@@ -438,3 +438,5 @@ async def example(db: AsyncSession = Depends(get_db_session)):
 - **Config:** `packages/common/config.py`
 - **Database:** `packages/common/database.py`
 - **Schemas:** `packages/common/schemas/`
+- Docker needs you to rebuild images when you change things and folder strucutres or add features
+- You need to add things to the relevant docker container after you build them, and you need to make sure if you make a file that depends on some other file you note it in your memory so you won't make the same mistake again

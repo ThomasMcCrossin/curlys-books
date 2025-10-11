@@ -72,7 +72,7 @@ services:
       - receipt_storage:/srv/curlys-books/objects
       - receipt_library:/library
     ports:
-      - "127.0.0.1:8000:8000"
+      - "0.0.0.0:8000:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -136,16 +136,18 @@ services:
     build:
       context: .
       dockerfile: infra/docker/web/Dockerfile
+      args:
+        - NEXT_PUBLIC_API_URL=http://192.168.2.20:8000
     container_name: curlys-books-web
     restart: unless-stopped
     environment:
-      - NEXT_PUBLIC_API_URL=http://api:8000
+      - NEXT_PUBLIC_API_URL=http://192.168.2.20:8000
       - NODE_ENV=${NODE_ENV:-production}
     volumes:
       - ./apps/web:/app/apps/web
       - web_cache:/app/.next
     ports:
-      - "127.0.0.1:3000:3000"
+      - "0.0.0.0:3000:3000"
     depends_on:
       - api
     mem_limit: 512m

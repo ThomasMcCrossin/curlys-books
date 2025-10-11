@@ -1,20 +1,23 @@
 """
-Tesseract OCR Engine - Primary OCR for receipt processing
+OCR Engine - AWS Textract-first with Tesseract fallback
 
-Smart text extraction:
-1. For PDFs: Try direct text extraction first (most PDFs have embedded text)
-2. If PDF text extraction fails/poor quality: Fall back to OCR
-3. For images: Always use OCR
+Policy (see CLAUDE.md lines 152-155):
+- Images (jpg, png, heic, tiff): AWS Textract ONLY (95%+ confidence guaranteed)
+- PDFs: Direct text extraction → Tesseract (≥96% confidence) → Textract fallback
 
-Uses pytesseract wrapper for Tesseract OCR engine.
-Processes PDF receipts page-by-page and extracts text with confidence scoring.
+Why Textract-first for images:
+- Bad OCR creates more work than it saves (manual review time, wasted AI calls)
+- Quality data is critical for accurate categorization
+- Tesseract on photos often produces <80% confidence → everything goes to review queue
 """
 import os
+import io
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 from typing import Optional
 
+import boto3
 import pypdf
 import structlog
 from pdf2image import convert_from_path
@@ -34,7 +37,7 @@ class OCRResult:
     text: str
     confidence: float  # 0.0 to 1.0
     page_count: int
-    method: str = "tesseract"
+    method: str  # textract, tesseract, pdf_text_extraction
 
     def __post_init__(self):
         """Ensure confidence is in valid range"""
@@ -42,42 +45,52 @@ class OCRResult:
             raise ValueError(f"Confidence must be 0-1, got {self.confidence}")
 
 
-class TesseractOCR:
+class OCREngine:
     """
-    Tesseract OCR engine for receipt text extraction.
+    OCR Engine implementing Textract-first policy.
 
-    Features:
-    - PDF to image conversion
-    - Page-by-page OCR
-    - Confidence scoring
-    - Automatic preprocessing
+    For images: Always use AWS Textract (95%+ confidence)
+    For PDFs: Try text extraction → Tesseract if good → Textract fallback
     """
 
     def __init__(
         self,
+        textract_enabled: bool = True,
+        aws_region: str = "us-east-1",
         tesseract_path: Optional[str] = None,
-        confidence_threshold: float = 0.90
+        tesseract_confidence_threshold: float = 0.96
     ):
         """
-        Initialize Tesseract OCR engine.
+        Initialize OCR Engine.
 
         Args:
+            textract_enabled: Whether to use AWS Textract (default: True)
+            aws_region: AWS region for Textract
             tesseract_path: Path to tesseract binary (auto-detected if None)
-            confidence_threshold: Minimum confidence to accept (0.0-1.0)
+            tesseract_confidence_threshold: Min confidence for Tesseract (0.96 = 96%)
         """
-        self.confidence_threshold = confidence_threshold
+        self.textract_enabled = textract_enabled
+        self.tesseract_threshold = tesseract_confidence_threshold
+
+        # Initialize AWS Textract client
+        if textract_enabled:
+            self.textract = boto3.client('textract', region_name=aws_region)
+            logger.info("textract_initialized", region=aws_region)
+        else:
+            self.textract = None
+            logger.warning("textract_disabled", message="Textract is disabled, will use Tesseract only")
 
         # Set tesseract path if provided
         if tesseract_path:
             pytesseract.pytesseract.tesseract_cmd = tesseract_path
 
-        logger.info("tesseract_initialized",
-                   threshold=confidence_threshold,
-                   path=tesseract_path or "auto-detected")
+        logger.info("ocr_engine_initialized",
+                   textract_enabled=textract_enabled,
+                   tesseract_threshold=tesseract_confidence_threshold)
 
     async def extract_text(self, file_path: str) -> OCRResult:
         """
-        Extract text from PDF or image file.
+        Extract text from PDF or image file using appropriate OCR strategy.
 
         Args:
             file_path: Path to PDF or image file
@@ -108,47 +121,114 @@ class TesseractOCR:
         else:
             raise ValueError(f"Unsupported file type: {suffix}")
 
+    async def _extract_from_image(self, image_path: Path) -> OCRResult:
+        """
+        Extract text from image file.
+
+        Policy: Images always use AWS Textract for 95%+ confidence.
+
+        Args:
+            image_path: Path to image file
+
+        Returns:
+            OCRResult with extracted text
+        """
+        if not self.textract_enabled:
+            logger.error("textract_required_but_disabled",
+                        message="Images require Textract but it's disabled")
+            raise RuntimeError("Textract is required for image OCR but is disabled")
+
+        try:
+            # Load and prepare image
+            image = Image.open(image_path)
+
+            # Convert HEIC/HEIF to JPG for Textract
+            if image_path.suffix.lower() in ['.heic', '.heif']:
+                logger.info("converting_heic_to_jpg")
+                image = image.convert('RGB')
+
+            # Convert image to bytes for Textract
+            buffer = io.BytesIO()
+            image.save(buffer, format='JPEG', quality=95)
+            image_bytes = buffer.getvalue()
+
+            logger.info("calling_textract", size_bytes=len(image_bytes))
+
+            # Call Textract
+            response = self.textract.detect_document_text(
+                Document={'Bytes': image_bytes}
+            )
+
+            # Extract text and confidence from Textract response
+            text_blocks = []
+            confidences = []
+
+            for block in response['Blocks']:
+                if block['BlockType'] == 'LINE':
+                    text_blocks.append(block['Text'])
+                    if 'Confidence' in block:
+                        confidences.append(block['Confidence'] / 100)  # Convert to 0-1
+
+            text = '\n'.join(text_blocks)
+            avg_confidence = sum(confidences) / len(confidences) if confidences else 0.95
+
+            logger.info("textract_complete",
+                       chars=len(text),
+                       lines=len(text_blocks),
+                       confidence=avg_confidence)
+
+            return OCRResult(
+                text=text,
+                confidence=avg_confidence,
+                page_count=1,
+                method="textract"
+            )
+
+        except Exception as e:
+            logger.error("textract_failed",
+                        error=str(e),
+                        file=str(image_path),
+                        exc_info=True)
+            raise
+
     async def _extract_from_pdf(self, pdf_path: Path) -> OCRResult:
         """
         Extract text from PDF file.
 
         Strategy:
-        1. Try direct text extraction first (most PDFs have embedded text)
-        2. If text extraction yields good content, use it (fast, accurate)
-        3. If no text or poor quality, fall back to OCR (slow, for scanned PDFs)
+        1. Try direct text extraction (fast, for native PDFs)
+        2. If no text, try Tesseract OCR (≥96% confidence required)
+        3. If Tesseract confidence <96%, fall back to Textract
 
         Args:
             pdf_path: Path to PDF file
 
         Returns:
-            OCRResult with combined text from all pages
+            OCRResult with extracted text
         """
         try:
-            # STEP 1: Try direct text extraction first (fast path for most PDFs)
+            # STEP 1: Try direct text extraction
             logger.info("pdf_attempting_text_extraction", file=str(pdf_path))
 
             try:
                 reader = pypdf.PdfReader(str(pdf_path))
                 page_texts = []
 
-                for page_num, page in enumerate(reader.pages, start=1):
+                for page in reader.pages:
                     text = page.extract_text()
                     page_texts.append(text)
 
                 combined_text = "\n\n--- PAGE BREAK ---\n\n".join(page_texts)
 
                 # Check if we got meaningful text
-                # Heuristic: Good PDFs have at least 50 chars and reasonable word density
                 word_count = len(combined_text.split())
                 char_count = len(combined_text.strip())
 
                 if char_count >= 50 and word_count >= 10:
-                    # Text extraction successful!
                     logger.info("pdf_text_extracted_successfully",
                                pages=len(reader.pages),
                                chars=char_count,
-                               words=word_count,
-                               method="direct_extraction")
+                               words=word_count)
 
                     return OCRResult(
                         text=combined_text,
@@ -157,49 +237,44 @@ class TesseractOCR:
                         method="pdf_text_extraction"
                     )
                 else:
-                    logger.warning("pdf_text_extraction_insufficient",
-                                  chars=char_count,
-                                  words=word_count,
-                                  message="PDF appears to be scanned/image-based, falling back to OCR")
+                    logger.info("pdf_text_extraction_insufficient",
+                               chars=char_count,
+                               words=word_count,
+                               message="PDF appears to be scanned, trying Tesseract")
 
             except Exception as e:
                 logger.warning("pdf_text_extraction_failed",
                               error=str(e),
-                              message="Falling back to OCR")
+                              message="Falling back to Tesseract")
 
-            # STEP 2: Fall back to OCR for scanned PDFs
-            logger.info("pdf_using_ocr_fallback", file=str(pdf_path))
+            # STEP 2: Try Tesseract OCR (must meet ≥96% confidence)
+            logger.info("pdf_trying_tesseract", threshold=self.tesseract_threshold)
 
-            # Convert PDF to images (one per page)
+            # Convert PDF to images
             images = convert_from_path(
                 str(pdf_path),
-                dpi=300,  # High DPI for better OCR
-                grayscale=True  # Grayscale reduces noise
+                dpi=300,
+                grayscale=True
             )
 
-            logger.info("pdf_converted_to_images",
-                       page_count=len(images),
-                       file=str(pdf_path))
+            logger.info("pdf_converted_to_images", page_count=len(images))
 
             # Extract text from each page
             page_texts = []
             page_confidences = []
 
             for page_num, image in enumerate(images, start=1):
-                # Get text and confidence data
+                # Get confidence data
                 data = pytesseract.image_to_data(
                     image,
                     output_type=pytesseract.Output.DICT,
-                    config='--psm 6'  # Assume uniform block of text
-                )
-
-                # Extract text
-                page_text = pytesseract.image_to_string(
-                    image,
                     config='--psm 6'
                 )
 
-                # Calculate average confidence (filter out empty detections)
+                # Extract text
+                page_text = pytesseract.image_to_string(image, config='--psm 6')
+
+                # Calculate confidence
                 confidences = [
                     int(conf) for conf, text in zip(data['conf'], data['text'])
                     if conf != -1 and text.strip()
@@ -207,117 +282,106 @@ class TesseractOCR:
 
                 avg_confidence = sum(confidences) / len(confidences) if confidences else 0
 
-                logger.info("page_ocr_complete",
+                logger.info("page_tesseract_complete",
                            page=page_num,
-                           chars=len(page_text),
                            confidence=avg_confidence)
 
                 page_texts.append(page_text)
                 page_confidences.append(avg_confidence)
 
-            # Combine all pages
             combined_text = "\n\n--- PAGE BREAK ---\n\n".join(page_texts)
             overall_confidence = sum(page_confidences) / len(page_confidences) if page_confidences else 0
+            overall_confidence = overall_confidence / 100  # Convert to 0-1
 
-            # Convert confidence from 0-100 to 0-1
-            overall_confidence = overall_confidence / 100
+            # STEP 3: Check if Tesseract confidence meets threshold
+            if overall_confidence >= self.tesseract_threshold:
+                logger.info("tesseract_confidence_acceptable",
+                           confidence=overall_confidence,
+                           threshold=self.tesseract_threshold)
 
-            logger.info("ocr_complete",
-                       pages=len(images),
-                       total_chars=len(combined_text),
-                       confidence=overall_confidence,
-                       meets_threshold=overall_confidence >= self.confidence_threshold)
+                return OCRResult(
+                    text=combined_text,
+                    confidence=overall_confidence,
+                    page_count=len(images),
+                    method="tesseract"
+                )
+            else:
+                logger.warning("tesseract_confidence_too_low",
+                              confidence=overall_confidence,
+                              threshold=self.tesseract_threshold,
+                              message="Falling back to Textract")
 
-            return OCRResult(
-                text=combined_text,
-                confidence=overall_confidence,
-                page_count=len(images),
-                method="tesseract"
-            )
+            # STEP 4: Fall back to Textract
+            if not self.textract_enabled:
+                logger.error("textract_needed_but_disabled",
+                            confidence=overall_confidence,
+                            message="Tesseract confidence too low but Textract is disabled")
+                # Return Tesseract result anyway
+                return OCRResult(
+                    text=combined_text,
+                    confidence=overall_confidence,
+                    page_count=len(images),
+                    method="tesseract_low_confidence"
+                )
 
-        except Exception as e:
-            logger.error("ocr_failed",
-                        error=str(e),
-                        file=str(pdf_path),
-                        exc_info=True)
-            raise
+            logger.info("using_textract_for_pdf")
 
-    async def _extract_from_image(self, image_path: Path) -> OCRResult:
-        """
-        Extract text from image file.
+            # Convert first page to JPG for Textract (multi-page support TODO)
+            buffer = io.BytesIO()
+            images[0].save(buffer, format='JPEG', quality=95)
+            image_bytes = buffer.getvalue()
 
-        Args:
-            image_path: Path to image file
-
-        Returns:
-            OCRResult with extracted text
-        """
-        try:
-            # Load image
-            image = Image.open(image_path)
-
-            # Convert HEIC/HEIF to RGB for Tesseract compatibility
-            if image_path.suffix.lower() in ['.heic', '.heif']:
-                # Convert to RGB and create a new Image object that Tesseract can handle
-                rgb_image = image.convert('RGB') if image.mode != 'RGB' else image
-                # Create new Image from the data to lose the HEIF format attribute
-                import io
-                buffer = io.BytesIO()
-                rgb_image.save(buffer, format='PNG')
-                buffer.seek(0)
-                image = Image.open(buffer)
-
-            # Get confidence data
-            data = pytesseract.image_to_data(
-                image,
-                output_type=pytesseract.Output.DICT,
-                config='--psm 6'
+            response = self.textract.detect_document_text(
+                Document={'Bytes': image_bytes}
             )
 
             # Extract text
-            text = pytesseract.image_to_string(
-                image,
-                config='--psm 6'
-            )
+            text_blocks = []
+            confidences = []
 
-            # Calculate average confidence
-            confidences = [
-                int(conf) for conf, txt in zip(data['conf'], data['text'])
-                if conf != -1 and txt.strip()
-            ]
+            for block in response['Blocks']:
+                if block['BlockType'] == 'LINE':
+                    text_blocks.append(block['Text'])
+                    if 'Confidence' in block:
+                        confidences.append(block['Confidence'] / 100)
 
-            avg_confidence = sum(confidences) / len(confidences) if confidences else 0
-            avg_confidence = avg_confidence / 100  # Convert to 0-1
+            text = '\n'.join(text_blocks)
+            avg_confidence = sum(confidences) / len(confidences) if confidences else 0.95
 
-            logger.info("image_ocr_complete",
+            logger.info("textract_complete",
                        chars=len(text),
                        confidence=avg_confidence)
 
             return OCRResult(
                 text=text,
                 confidence=avg_confidence,
-                page_count=1,
-                method="tesseract"
+                page_count=1,  # TODO: Multi-page PDF support
+                method="textract_fallback"
             )
 
         except Exception as e:
-            logger.error("image_ocr_failed",
+            logger.error("pdf_ocr_failed",
                         error=str(e),
-                        file=str(image_path),
+                        file=str(pdf_path),
                         exc_info=True)
             raise
 
 
-# Singleton instance for easy import
-ocr_engine = TesseractOCR(
+# Singleton instance
+ocr_engine = OCREngine(
+    textract_enabled=os.getenv('TEXTRACT_FALLBACK_ENABLED', 'true').lower() == 'true',
+    aws_region=os.getenv('AWS_TEXTRACT_REGION', 'us-east-1'),
     tesseract_path=os.getenv('TESSERACT_PATH', '/usr/bin/tesseract'),
-    confidence_threshold=float(os.getenv('TESSERACT_CONFIDENCE_THRESHOLD', '0.90'))
+    tesseract_confidence_threshold=float(os.getenv('TESSERACT_CONFIDENCE_THRESHOLD', '0.96'))
 )
 
 
 async def extract_text_from_receipt(file_path: str) -> OCRResult:
     """
-    Convenience function for OCR extraction.
+    Convenience function for OCR extraction using Textract-first policy.
+
+    For images: Always uses AWS Textract (95%+ confidence)
+    For PDFs: Tries text extraction → Tesseract (≥96%) → Textract
 
     Args:
         file_path: Path to receipt file (PDF or image)
@@ -329,11 +393,9 @@ async def extract_text_from_receipt(file_path: str) -> OCRResult:
         ```python
         from packages.parsers.ocr_engine import extract_text_from_receipt
 
-        result = await extract_text_from_receipt("/path/to/receipt.pdf")
-        if result.confidence >= 0.90:
-            print(f"High confidence text:\n{result.text}")
-        else:
-            print(f"Low confidence ({result.confidence}), use Textract")
+        result = await extract_text_from_receipt("/path/to/receipt.jpg")
+        print(f"Method: {result.method}, Confidence: {result.confidence:.0%}")
+        print(result.text)
         ```
     """
     return await ocr_engine.extract_text(file_path)
