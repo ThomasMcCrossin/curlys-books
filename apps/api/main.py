@@ -47,7 +47,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 version="0.1.0")
     
     # Initialize database connection pool
-    sessionmanager.init(settings.database_url)
+    await sessionmanager.init(settings.database_url)
     
     yield
     

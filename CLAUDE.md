@@ -79,13 +79,14 @@ docker compose exec api python packages/parsers/statement_parser.py statements/t
 **CRITICAL:** OCR and parsing tools are **only** in the `worker` container.
 
 - **API Container (`api`):** FastAPI web server, endpoints, request validation
-  - **Has:** Python, FastAPI, SQLAlchemy, Pydantic
-  - **Does NOT have:** Tesseract, pdf2image, OCR libraries
-  - **Cannot run:** OCR scripts, parser tests that need image processing
+  - **Has:** Python, FastAPI, SQLAlchemy, Pydantic, boto3 (Textract)
+  - **Does NOT have:** Tesseract, pytesseract (Tesseract is optional)
+  - **Cannot run:** OCR scripts that require Tesseract, parser tests that need Tesseract
 
 - **Worker Container (`worker`):** Celery background tasks, OCR processing
-  - **Has:** Python, Tesseract, Pillow, pdf2image, pytesseract, all parser code
-  - **Runs:** `services/worker/tasks/ocr_receipt.py`
+  - **Has:** Python, Textract (boto3), Pillow, pdf2image, all parser code
+  - **Has (optional):** Tesseract, pytesseract (for PDF fallback)
+  - **Runs:** `services/worker/tasks/ocr_receipt.py` via `packages/parsers/ocr/`
   - **Use for:** Testing parsers, running OCR scripts, processing receipts
 
 **Common Mistakes:**
@@ -149,9 +150,10 @@ Verify with: `make check-imports`
 
 1. **Upload** → `apps/api/routers/receipts.py` saves to `/srv/curlys-books/objects/{entity}/{receipt_id}/original.{ext}`
 2. **Queue OCR** → Celery task `services/worker/tasks/ocr_receipt.py`
-3. **OCR Strategy** → Quality data is critical to reduce manual review:
+3. **OCR Strategy** → Uses pluggable provider pattern (see [OCR_PROVIDER_ARCHITECTURE.md](docs/OCR_PROVIDER_ARCHITECTURE.md)):
    - **Images** (jpg, png, heic, tiff): AWS Textract ONLY (95%+ confidence guaranteed)
-   - **PDFs**: Direct text extraction → Tesseract (≥96% confidence) → Textract fallback
+   - **PDFs**: Direct text extraction → Tesseract (≥96% confidence, optional) → Textract fallback
+   - **Entry point:** `packages/parsers/ocr/factory.py` - `extract_text_from_receipt()`
    - **Why:** Bad OCR creates more work than it saves (review time, wasted AI calls)
 4. **Vendor Parsing** → `packages/parsers/vendor_dispatcher.py` routes to vendor-specific template
 5. **Normalization** → Output as `ReceiptNormalized` schema (packages/common/schemas/receipt_normalized.py)

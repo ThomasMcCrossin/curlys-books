@@ -29,8 +29,7 @@ redis = "^5.0.1"
 celery = "^5.3.6"
 celery-types = "^0.20.0"
 
-# OCR & Image Processing
-pytesseract = "^0.3.10"
+# OCR & Image Processing (core)
 Pillow = "^10.2.0"
 pillow-heif = "^0.15.0"
 opencv-python-headless = "^4.9.0"
@@ -78,6 +77,9 @@ prometheus-client = "^0.19.0"
 rclone-python = "^0.1.11"
 boto3 = "^1.34.34"
 
+# Optional OCR providers
+pytesseract = {version = "^0.3.10", optional = true}
+
 [tool.poetry.group.dev.dependencies]
 # Testing
 pytest = "^7.4.4"
@@ -102,6 +104,9 @@ sqlalchemy-stubs = "^0.4"
 
 # Import checking
 import-linter = "^2.0"
+
+[tool.poetry.extras]
+tesseract = ["pytesseract"]
 
 [tool.poetry.group.test.dependencies]
 coverage = {extras = ["toml"], version = "^7.4.1"}

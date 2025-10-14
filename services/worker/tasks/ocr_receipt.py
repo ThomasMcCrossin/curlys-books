@@ -30,8 +30,7 @@ from PIL import Image
 from services.worker.celery_app import app
 from packages.common.database import get_db_session
 from packages.common.schemas.receipt_normalized import EntityType
-from packages.parsers.ocr_engine import extract_text_from_receipt
-from packages.parsers.textract_fallback import extract_with_textract
+from packages.parsers.ocr import extract_text_from_receipt
 from packages.parsers.vendor_dispatcher import parse_receipt
 from packages.parsers.vendor_service import VendorRegistry
 from packages.domain.categorization.categorization_service import categorization_service
@@ -128,9 +127,8 @@ def create_normalized_image(original_path: str, max_width: int = 800) -> None:
                         error=str(e),
                         exc_info=True)
 
-# Configuration from environment
-TESSERACT_CONFIDENCE_THRESHOLD = float(os.getenv('TESSERACT_CONFIDENCE_THRESHOLD', '0.90'))
-TEXTRACT_FALLBACK_ENABLED = os.getenv('TEXTRACT_FALLBACK_ENABLED', 'true').lower() == 'true'
+# OCR is now handled by the factory in packages/parsers/ocr/
+# Configuration is read from environment in the factory
 
 
 class OCRTask(Task):
@@ -178,82 +176,26 @@ async def process_receipt_task(
         # Step 1: Extract text with OCR (strategy depends on file type)
         logger.info("ocr_step_1_extracting_text", receipt_id=receipt_id)
 
-        file_ext = Path(file_path).suffix.lower()
-        is_image = file_ext in ['.jpg', '.jpeg', '.png', '.heic', '.heif', '.tiff', '.tif', '.bmp']
-        is_pdf = file_ext == '.pdf'
-
-        if is_image:
-            # Images: Use Textract ONLY (no Tesseract for production)
-            logger.info("ocr_using_textract_for_image", receipt_id=receipt_id, file_type=file_ext)
-
-            try:
-                ocr_result = await extract_with_textract(file_path)
-
-                logger.info("ocr_textract_complete",
-                           receipt_id=receipt_id,
-                           confidence=ocr_result.confidence,
-                           chars=len(ocr_result.text),
-                           method=ocr_result.method)
-
-            except Exception as e:
-                logger.error("textract_failed_for_image",
-                            receipt_id=receipt_id,
-                            error=str(e),
-                            exc_info=True)
-                raise  # Don't continue with bad OCR - fail fast
-
-        elif is_pdf:
-            # PDFs: Try text extraction → Tesseract (96%+) → Textract
-            logger.info("ocr_pdf_strategy", receipt_id=receipt_id)
-
-            # First try direct text extraction (free, 100% accurate for text-based PDFs)
+        # Use the new OCR factory - it handles all file types automatically
+        # Strategy:
+        #   - Images: Always Textract (95%+ confidence)
+        #   - PDFs: Text extraction → Tesseract (≥96%) → Textract fallback
+        try:
             ocr_result = await extract_text_from_receipt(file_path)
 
-            if ocr_result.method == "pdf_text_extraction":
-                # Got embedded text - perfect!
-                logger.info("ocr_pdf_text_extraction_success",
-                           receipt_id=receipt_id,
-                           confidence=ocr_result.confidence,
-                           chars=len(ocr_result.text))
-            else:
-                # PDF required OCR (scanned/image-based PDF)
-                logger.info("ocr_pdf_required_tesseract",
-                           receipt_id=receipt_id,
-                           confidence=ocr_result.confidence,
-                           chars=len(ocr_result.text),
-                           pages=ocr_result.page_count)
+            logger.info("ocr_complete",
+                       receipt_id=receipt_id,
+                       method=ocr_result.method,
+                       confidence=ocr_result.confidence,
+                       chars=len(ocr_result.text),
+                       pages=ocr_result.page_count)
 
-                # If Tesseract confidence < 96%, use Textract
-                if ocr_result.confidence < 0.96 and TEXTRACT_FALLBACK_ENABLED:
-                    logger.warning("ocr_pdf_low_confidence_using_textract",
-                                  receipt_id=receipt_id,
-                                  tesseract_confidence=ocr_result.confidence,
-                                  threshold=0.96)
-
-                    try:
-                        ocr_result = await extract_with_textract(file_path)
-
-                        logger.info("ocr_textract_complete",
-                                   receipt_id=receipt_id,
-                                   confidence=ocr_result.confidence,
-                                   chars=len(ocr_result.text))
-
-                    except Exception as e:
-                        logger.error("textract_fallback_failed",
-                                    receipt_id=receipt_id,
-                                    error=str(e),
-                                    exc_info=True)
-                        # Continue with Tesseract result if Textract fails
-                        logger.warning("using_tesseract_despite_low_confidence",
-                                      receipt_id=receipt_id,
-                                      confidence=ocr_result.confidence)
-        else:
-            # Unknown file type - try Tesseract as last resort
-            logger.warning("ocr_unknown_file_type",
-                          receipt_id=receipt_id,
-                          file_type=file_ext,
-                          message="Attempting Tesseract OCR")
-            ocr_result = await extract_text_from_receipt(file_path)
+        except Exception as e:
+            logger.error("ocr_failed",
+                        receipt_id=receipt_id,
+                        error=str(e),
+                        exc_info=True)
+            raise  # Fail fast on OCR errors
 
         # Step 1.5: Create normalized image (800px width) for UI display
         logger.info("ocr_step_1_5_creating_normalized_image", receipt_id=receipt_id)

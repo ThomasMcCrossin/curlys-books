@@ -158,6 +158,19 @@ services:
       timeout: 10s
       retries: 3
 
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: curlys-books-tunnel
+    restart: unless-stopped
+    command: tunnel run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - api
+      - web
+    mem_limit: 128m
+    cpus: 0.25
+
 volumes:
   postgres_data:
     driver: local
