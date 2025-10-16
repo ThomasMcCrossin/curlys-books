@@ -179,16 +179,15 @@ class BaseReceiptParser(ABC):
         subtotal: Decimal,
         tolerance: Decimal = Decimal('0.10'),
         vendor_name: Optional[str] = None
-    ) -> list[ReceiptLine]:
+    ) -> tuple[list[ReceiptLine], Optional[dict]]:
         """
-        Handle faded/missing line items by creating placeholder for difference.
+        Detect if line items don't sum to subtotal (faded/missing items).
 
-        Thermal receipts fade over time, making some line items unreadable.
-        When line items don't sum to subtotal (beyond tolerance), create a
-        placeholder line item for the missing amount.
+        IMPORTANT: Does NOT create placeholder lines. Instead, returns a validation
+        warning dict that the parser should include in ReceiptNormalized.validation_warnings.
 
-        This ensures totals always validate while allowing user to fix details
-        in the frontend.
+        The review UI will show bounding boxes for detected items so the user
+        can visually identify what's missing on the receipt.
 
         Args:
             lines: List of extracted line items
@@ -197,7 +196,7 @@ class BaseReceiptParser(ABC):
             vendor_name: Vendor name for logging (optional)
 
         Returns:
-            Updated list of lines (may include placeholder)
+            Tuple of (original lines, validation_warning dict or None)
         """
         # Sum ITEM and FEE line types (both contribute to subtotal)
         # ITEM = products (COGS), FEE = deposits/environmental charges
@@ -211,32 +210,27 @@ class BaseReceiptParser(ABC):
 
         if abs(missing_amount) > tolerance:
             logger.warning(
-                "missing_line_items_detected",
+                "subtotal_mismatch_detected",
                 vendor=vendor_name,
                 line_item_total=float(line_item_total),
                 subtotal=float(subtotal),
                 missing=float(missing_amount),
-                message="Creating placeholder for unscanned items"
+                message="Line items don't sum to subtotal - receipt flagged for review"
             )
 
-            # Add placeholder line for missing amount
-            lines.append(ReceiptLine(
-                line_index=len(lines),
-                line_type=LineType.ITEM,
-                item_description="[Faded/Unscanned Items - Review Required]",
-                quantity=Decimal('1'),
-                unit_price=missing_amount,
-                line_total=missing_amount,
-                tax_flag=TaxFlag.TAXABLE,  # Assume taxable (user can adjust)
-            ))
+            # Return warning for inclusion in ReceiptNormalized
+            warning = {
+                "type": "subtotal_mismatch",
+                "message": f"Line items sum to ${float(line_item_total):.2f} but receipt subtotal is ${float(subtotal):.2f} (missing ${abs(float(missing_amount)):.2f})",
+                "data": {
+                    "found_total": float(line_item_total),
+                    "expected_total": float(subtotal),
+                    "difference": float(abs(missing_amount))
+                }
+            }
+            return lines, warning
 
-            logger.info(
-                "placeholder_created",
-                vendor=vendor_name,
-                placeholder_amount=float(missing_amount)
-            )
-
-        return lines
+        return lines, None
 
 
 class ParserNotApplicableError(Exception):

@@ -249,8 +249,7 @@ async def process_receipt_task(
                        receipt_id=receipt_id,
                        vendor=parsed_receipt.vendor_guess,
                        total=float(parsed_receipt.total),
-                       lines=len(parsed_receipt.lines),
-                       parser=parsed_receipt.metadata.get('parser'))
+                       lines=len(parsed_receipt.lines))
 
         except Exception as e:
             logger.error("parsing_failed",
@@ -554,6 +553,13 @@ async def store_receipt_results(
     else:
         file_path_sql = ""
 
+    # Add validation_warnings if present
+    if parsed_receipt.validation_warnings:
+        update_fields["validation_warnings"] = json.dumps(parsed_receipt.validation_warnings)
+        validation_warnings_sql = ", validation_warnings = :validation_warnings::jsonb"
+    else:
+        validation_warnings_sql = ""
+
     await session.execute(
         text(f"""
             UPDATE {schema_name}.receipts
@@ -566,7 +572,8 @@ async def store_receipt_results(
                 ocr_method = :ocr_method,
                 extracted_text = :extracted_text,
                 purchase_date = :purchase_date
-                {file_path_sql},
+                {file_path_sql}
+                {validation_warnings_sql},
                 updated_at = NOW()
             WHERE id = :receipt_id
         """),
@@ -754,13 +761,88 @@ async def reprocess_receipt_task(receipt_id: str) -> Dict[str, Any]:
     Returns:
         Processing results
     """
+    from sqlalchemy import text
+
     logger.info("reprocessing_receipt", receipt_id=receipt_id)
 
-    # TODO: Fetch receipt details from database
-    # TODO: Call process_receipt_task with existing file_path
+    # Fetch existing receipt from database
+    async for session in get_db_session():
+        try:
+            # Try both schemas
+            for schema_name in ['curlys_corp', 'curlys_soleprop']:
+                result = await session.execute(
+                    text(f"""
+                        SELECT id, entity, original_file_path
+                        FROM {schema_name}.receipts
+                        WHERE id = :receipt_id
+                    """),
+                    {"receipt_id": receipt_id}
+                )
+                row = result.fetchone()
 
-    return {
-        "success": False,
-        "receipt_id": receipt_id,
-        "message": "Reprocessing not yet implemented - Phase 1.5",
-    }
+                if row:
+                    entity = row[1]
+                    file_path = row[2]
+
+                    if not file_path or not Path(file_path).exists():
+                        logger.error("receipt_file_not_found",
+                                   receipt_id=receipt_id,
+                                   file_path=file_path)
+                        return {
+                            "success": False,
+                            "receipt_id": receipt_id,
+                            "error": "Receipt file not found"
+                        }
+
+                    logger.info("receipt_found_reprocessing",
+                               receipt_id=receipt_id,
+                               entity=entity,
+                               file_path=file_path)
+
+                    # Delete existing line items
+                    await session.execute(
+                        text(f"""
+                            DELETE FROM {schema_name}.receipt_line_items
+                            WHERE receipt_id = :receipt_id
+                        """),
+                        {"receipt_id": receipt_id}
+                    )
+
+                    await session.commit()
+
+                    logger.info("existing_line_items_deleted", receipt_id=receipt_id)
+
+                    # Reprocess with existing file
+                    # Generate a new content hash from the file
+                    import hashlib
+                    with open(file_path, 'rb') as f:
+                        content_hash = hashlib.sha256(f.read()).hexdigest()
+
+                    result = await process_receipt_task(
+                        receipt_id=receipt_id,
+                        entity=entity,
+                        file_path=file_path,
+                        content_hash=content_hash,
+                        source="reprocess"
+                    )
+
+                    return result
+
+            # Receipt not found in either schema
+            logger.error("receipt_not_found", receipt_id=receipt_id)
+            return {
+                "success": False,
+                "receipt_id": receipt_id,
+                "error": "Receipt not found in database"
+            }
+
+        except Exception as e:
+            logger.error("reprocess_failed",
+                        receipt_id=receipt_id,
+                        error=str(e),
+                        exc_info=True)
+            return {
+                "success": False,
+                "receipt_id": receipt_id,
+                "error": str(e)
+            }

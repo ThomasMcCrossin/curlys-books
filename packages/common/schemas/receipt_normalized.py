@@ -133,7 +133,13 @@ class ReceiptNormalized(BaseModel):
     ocr_confidence: Optional[int] = Field(None, ge=0, le=100, description="OCR confidence score")
     ocr_method: Optional[str] = Field(None, description="tesseract, gpt4v, manual")
     parsing_errors: Optional[List[str]] = Field(default=None, description="Any parsing issues")
-    
+
+    # Validation warnings (added per user feedback - don't create fake balancing lines)
+    validation_warnings: Optional[List[dict]] = Field(
+        default=None,
+        description="Validation issues detected during parsing (e.g., subtotal mismatch)"
+    )
+
     # File references
     content_hash: Optional[str] = Field(None, description="SHA256 hash of original file")
     perceptual_hash: Optional[str] = Field(None, description="Perceptual hash for similarity")
@@ -153,27 +159,16 @@ class ReceiptNormalized(BaseModel):
     
     @validator("lines")
     def validate_lines_sum(cls, v, values):
-        """Ensure line items sum to subtotal"""
-        if not v or "subtotal" not in values:
-            return v
-        
-        items_total = sum(
-            line.line_total for line in v 
-            if line.line_type in [LineType.ITEM, LineType.FEE]
-        )
-        discounts_total = sum(
-            line.line_total for line in v 
-            if line.line_type == LineType.DISCOUNT
-        )
-        
-        calculated_subtotal = items_total - abs(discounts_total)
-        
-        # Allow small rounding differences
-        if abs(calculated_subtotal - values["subtotal"]) > Decimal("0.02"):
-            raise ValueError(
-                f"Line items sum to ${calculated_subtotal} but subtotal is ${values['subtotal']}"
-            )
-        
+        """
+        Validate line items (removed strict sum validation per user feedback).
+
+        Previously this would raise ValueError if line items didn't sum to subtotal.
+        Now we just pass through - the parser logs a warning and stores it in
+        validation_warnings field for human review. The review UI shows bounding
+        boxes so the reviewer can visually identify what's missing on the receipt.
+
+        This prevents creating fake "faded items" balancing lines.
+        """
         return v
     
     class Config:

@@ -314,10 +314,10 @@ export default function ReviewQueuePage() {
                 className="bg-white rounded-lg shadow p-6 hover:shadow-lg transition-shadow"
               >
                 <div className="flex items-start justify-between mb-4 gap-6">
-                  {/* Receipt Image */}
+                  {/* Receipt Image - Small thumbnail with hover zoom */}
                   {item.details?.receipt_id && (
-                    <div className="flex-shrink-0 w-96">
-                      <div className="sticky top-4">
+                    <div className="flex-shrink-0 w-48">
+                      <div className="sticky top-4 group">
                         <div className="bg-blue-50 border border-blue-200 rounded-t-lg px-3 py-2">
                           <div className="text-xs font-medium text-blue-900">
                             Receipt #{item.details.receipt_id.substring(0, 8)}...
@@ -326,35 +326,54 @@ export default function ReviewQueuePage() {
                             <div className="text-xs text-blue-700 mt-1 flex items-center gap-2">
                               <span className="inline-block w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
                               Line {item.details.line_number}
-                              {item.details.description && (
-                                <span className="text-gray-600">- Look for: "{item.details.description.substring(0, 30)}..."</span>
-                              )}
                             </div>
                           )}
                         </div>
-                        <div className="relative bg-gray-100">
+                        <div className="relative bg-gray-100 overflow-hidden">
+                          {/* Small thumbnail */}
                           <img
-                            src={`${apiUrl}/api/v1/receipts/${item.details.receipt_id}/file?file_type=normalized`}
+                            src={`${apiUrl}/api/v1/receipts/${item.details.receipt_id}/file?file_type=cropped`}
                             alt="Receipt"
-                            className="w-full h-auto rounded-b-lg border-2 border-gray-300 cursor-zoom-in hover:border-blue-400 transition-colors"
+                            className="w-full h-auto rounded-b-lg border-2 border-gray-300 cursor-pointer hover:border-blue-400 transition-all duration-200 group-hover:opacity-0"
                             onClick={(e) => {
-                              // Open in new tab for full size view
-                              window.open(`${apiUrl}/api/v1/receipts/${item.details.receipt_id}/file`, '_blank');
+                              // Open full size in new tab
+                              window.open(`${apiUrl}/api/v1/receipts/${item.details.receipt_id}/file?file_type=original`, '_blank');
                             }}
                             onError={(e) => {
-                              // Fallback to original if normalized doesn't exist
+                              // Fallback to normalized if cropped doesn't exist
                               const target = e.currentTarget;
-                              if (!target.src.includes('file_type=original')) {
+                              if (target.src.includes('file_type=cropped')) {
+                                target.src = `${apiUrl}/api/v1/receipts/${item.details.receipt_id}/file?file_type=normalized`;
+                              } else if (target.src.includes('file_type=normalized')) {
                                 target.src = `${apiUrl}/api/v1/receipts/${item.details.receipt_id}/file?file_type=original`;
                               } else {
                                 target.style.display = 'none';
                               }
                             }}
                           />
-                          {/* Bounding box highlight from Textract */}
+                          {/* Hover zoom - larger version appears on hover */}
+                          <img
+                            src={`${apiUrl}/api/v1/receipts/${item.details.receipt_id}/file?file_type=cropped`}
+                            alt="Receipt (zoomed)"
+                            className="absolute top-0 left-0 w-auto h-auto max-w-[600px] max-h-[800px] rounded-lg border-4 border-blue-500 shadow-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-50"
+                            style={{
+                              transformOrigin: 'top left',
+                              transform: 'scale(2.5)'
+                            }}
+                            onError={(e) => {
+                              // Fallback to normalized if cropped doesn't exist
+                              const target = e.currentTarget;
+                              if (target.src.includes('file_type=cropped')) {
+                                target.src = `${apiUrl}/api/v1/receipts/${item.details.receipt_id}/file?file_type=normalized`;
+                              } else if (target.src.includes('file_type=normalized')) {
+                                target.src = `${apiUrl}/api/v1/receipts/${item.details.receipt_id}/file?file_type=original`;
+                              }
+                            }}
+                          />
+                          {/* Bounding box highlight from Textract (on thumbnail) */}
                           {item.details.bounding_box && (
                             <div
-                              className="absolute border-4 border-red-500 bg-red-500 bg-opacity-20 pointer-events-none animate-pulse"
+                              className="absolute border-2 border-red-500 bg-red-500 bg-opacity-20 pointer-events-none animate-pulse group-hover:opacity-0"
                               style={{
                                 left: `${item.details.bounding_box.left * 100}%`,
                                 top: `${item.details.bounding_box.top * 100}%`,
@@ -362,23 +381,20 @@ export default function ReviewQueuePage() {
                                 height: `${item.details.bounding_box.height * 100}%`,
                               }}
                             >
-                              <div className="absolute -top-6 left-0 bg-red-500 text-white px-2 py-1 rounded text-xs font-bold">
-                                Problem Line
-                              </div>
-                            </div>
-                          )}
-                          {/* Fallback visual indicator if no bounding box */}
-                          {!item.details.bounding_box && item.details.line_number && (
-                            <div className="absolute bottom-4 left-0 right-0 flex justify-center pointer-events-none">
-                              <div className="bg-red-500 text-white px-3 py-1 rounded-full text-xs font-bold shadow-lg animate-bounce">
-                                ⬇ Line {item.details.line_number} Near Bottom ⬇
+                              <div className="absolute -top-4 left-0 bg-red-500 text-white px-1 py-0.5 rounded text-[10px] font-bold">
+                                Line
                               </div>
                             </div>
                           )}
                         </div>
                         <div className="mt-2 text-xs text-gray-600 text-center space-y-1">
-                          <div>🔍 Click image to view full size</div>
-                          <div className="text-blue-600">💡 Look near the bottom of receipt for this line</div>
+                          <div className="font-medium">Hover to zoom</div>
+                          <div className="text-blue-600">Click to open full size</div>
+                          {item.details.description && (
+                            <div className="text-gray-500 text-[10px] mt-1 italic">
+                              Look for: "{item.details.description.substring(0, 25)}..."
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -418,6 +434,27 @@ export default function ReviewQueuePage() {
                         </div>
                       </div>
                     )}
+
+                    {/* Validation Warnings */}
+                    {item.details?.validation_warnings && item.details.validation_warnings.length > 0 && (
+                      <div className="mt-3 p-3 bg-red-50 border border-red-300 rounded">
+                        <div className="text-sm font-bold text-red-900 mb-2">⚠️ Validation Issues:</div>
+                        <div className="space-y-2">
+                          {item.details.validation_warnings.map((warning: any, idx: number) => (
+                            <div key={idx} className="text-sm text-red-800">
+                              <div className="font-medium">{warning.message}</div>
+                              {warning.data && warning.type === 'subtotal_mismatch' && (
+                                <div className="mt-1 text-xs bg-red-100 p-2 rounded">
+                                  <div>Found: ${warning.data.found_total}</div>
+                                  <div>Expected: ${warning.data.expected_total}</div>
+                                  <div className="font-bold">Missing: ${warning.data.difference}</div>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -450,7 +487,7 @@ export default function ReviewQueuePage() {
                   <button
                     className="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 font-medium"
                   >
-                    Details →
+                    Manual Review →
                   </button>
                 </div>
               </div>

@@ -73,7 +73,9 @@ app.add_middleware(
     allow_origins=[
         "https://receipts.curlys.ca",
         "https://books.curlys.ca",
-        "http://192.168.2.20:3000",  # Local development
+        "https://review.curlys.ca",
+        "http://localhost:3000",  # Local development
+        "http://192.168.2.20:3000",  # Local network access
     ] if settings.environment == "production" else ["*"],
     allow_credentials=True,
     allow_methods=["*"],

@@ -101,9 +101,12 @@ class WalmartCanadaParser(BaseReceiptParser):
         total = self._extract_total(text) or (subtotal + tax_total)
 
         lines = self._extract_lines(text)
-        lines = self.handle_missing_line_items(
+        lines, validation_warning = self.handle_missing_line_items(
             lines=lines, subtotal=subtotal, vendor_name="Walmart"
         )
+
+        # Build validation_warnings list if there are any warnings
+        validation_warnings = [validation_warning] if validation_warning else None
 
         logger.info(
             "walmart_parsed",
@@ -127,6 +130,7 @@ class WalmartCanadaParser(BaseReceiptParser):
             total=total,
             lines=lines,
             is_bill=False,
+            validation_warnings=validation_warnings,
         )
 
     # ----------------------- helpers -----------------------
